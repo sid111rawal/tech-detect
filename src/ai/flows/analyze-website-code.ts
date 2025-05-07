@@ -113,6 +113,11 @@ Your analysis must be exceptionally thorough. Go beyond obvious declarations.
 *   **Examine Minified and Obfuscated Code:** Actively look for patterns, unique string literals, or function structures within inline <script> tags that are characteristic of specific libraries, even if the code is minified or lightly obfuscated. For example, jQuery often uses '$' or 'jQuery' globals, React might leave '__REACT_DEVTOOLS_GLOBAL_HOOK__' or specific DOM attribute patterns like 'data-reactroot'.
 *   **Fingerprinting:** Identify technologies by their "fingerprints" – unique CSS class name prefixes (e.g., 'wp-' for WordPress, 'v-' for Vue), specific HTML comment patterns, meta tags (e.g., '<meta name="generator" content="WordPress 5.x">'), inline JSON-LD, or unique IDs/structures.
 *   **Script Tag Analysis:** Analyze 'src' attributes of <script> and <link> tags. Even if you can't fetch the content, the URL structure can reveal CDNs (e.g., cdnjs, unpkg, jsdelivr) or specific services. Look for version numbers in these URLs.
+*   **Aggressive technology Inference from Obfuscated Code**: Even if code is heavily obfuscated, attempt to infer technologies by identifying characteristic patterns. For example:
+    *  Look for large base64 encoded strings which can indicate the presence of minified assets or inline images.
+    *  Detect eval() calls or Function() constructors, which are often used to dynamically generate code. Trace the inputs to these calls if possible.
+    *  Analyze variable names and string literals, even if they are obfuscated. Some obfuscation techniques leave recognizable fragments.
+    *  Identify patterns in how DOM elements are created and manipulated, which might be unique to certain frameworks.
 *   **Global Variables:** Infer technologies from the presence of known library-specific global variables (e.g., window.jQuery, window.angular, window.dataLayer for Google Tag Manager).
 *   **HTML Structure & Comments:** Look for characteristic HTML structures, data attributes ('data-*'), or revealing comments left by developers or build tools.
 
@@ -170,4 +175,3 @@ const analyzeWebsiteCodeFlow = ai.defineFlow(
     return output;
   }
 );
-
