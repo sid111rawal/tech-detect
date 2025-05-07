@@ -1,3 +1,5 @@
+import { analyzeWebsiteCode } from '@/ai/flows/analyze-website-code';
+
 /**
  * Represents the analysis result of a website.
  */
@@ -19,10 +21,6 @@ export interface WebsiteAnalysisResult {
  * @returns A promise that resolves to a WebsiteAnalysisResult object.
  */
 export async function analyzeWebsite(url: string): Promise<WebsiteAnalysisResult> {
-  // TODO: Implement this by calling an API or using a library.
-
-  return {
-    detectedTechnologies: ['React', 'Node.js', 'Express'],
-    securityConcerns: ['Potential XSS vulnerability', 'Insecure dependencies'],
-  };
+  // Call the analyzeWebsiteCode flow to get the actual analysis result.
+  return analyzeWebsiteCode({ url });
 }
