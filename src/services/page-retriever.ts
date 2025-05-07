@@ -73,7 +73,6 @@ export async function retrievePageContent(url: string): Promise<PageContentResul
     const contentType = response.headers.get('content-type');
     if (!contentType || !contentType.includes('text/html')) {
         console.warn(`[Service/PageRetriever] URL ${url} returned non-HTML content-type: ${contentType}. Content will be processed, but HTML-specific signatures might not match.`);
-        // Still attempt to get text content for non-HTML types, as some signatures might work on headers/cookies or generic text patterns.
     }
 
     const textContent = await response.text();
@@ -87,30 +86,35 @@ export async function retrievePageContent(url: string): Promise<PageContentResul
     };
   } catch (error: any) {
     clearTimeout(timeoutId);
-    console.error(`[Service/PageRetriever] Error fetching URL ${url}:`, error); // Log the full error object
+    console.error(`[Service/PageRetriever] Error fetching URL ${url}:`, error);
 
     if (error.name === 'AbortError' || (error.cause && error.cause.name === 'TimeoutError')) {
-      return { html: null, error: 'Request timed out while fetching content.', finalUrl: url, status: undefined };
+      return { html: null, error: 'Request timed out while fetching content after 15 seconds.', finalUrl: url, status: undefined };
     }
 
-    let detailedErrorMessage = error.message || 'Unknown error fetching content.'; // Default to "fetch failed" or similar
+    let detailedErrorMessage = error.message || 'Unknown error fetching content.';
+    let hostname = url;
+    try {
+        hostname = new URL(url).hostname;
+    } catch (e) { /* ignore if URL is invalid */ }
 
-    // Attempt to get more specific details from error.cause, common in Node.js fetch
     if (error.cause && typeof error.cause === 'object') {
       const cause = error.cause as any;
-      if (cause.code) { // System-level error codes like ENOTFOUND, ECONNREFUSED
-        detailedErrorMessage = `Network error: ${cause.code}. Please check server connectivity and DNS resolution.`;
+      if (cause.code) {
         if (cause.code === 'ENOTFOUND') {
-            detailedErrorMessage = `DNS resolution failed for the host: ${new URL(url).hostname}. Ensure the domain is correct and reachable.`;
+            detailedErrorMessage = `DNS resolution failed for the host: ${hostname}. Ensure the domain is correct and reachable.`;
         } else if (cause.code === 'ECONNREFUSED') {
-            detailedErrorMessage = `Connection refused by the server at ${new URL(url).hostname}. The server might be down or blocking requests.`;
+            detailedErrorMessage = `Connection refused by the server at ${hostname}. The server might be down or blocking requests.`;
+        } else if (cause.code === 'UND_ERR_CONNECT_TIMEOUT' || cause.code === 'ETIMEDOUT') {
+            detailedErrorMessage = `Connection timed out trying to reach ${hostname}. The website might be temporarily unavailable or there could be network issues. Please verify the URL and try again later.`;
+        } else {
+            detailedErrorMessage = `Network error: ${cause.code}. Please check server connectivity and DNS resolution.`;
         }
       } else if (cause.message) {
         detailedErrorMessage = `Network error details: ${cause.message}.`;
       }
-      // Log the full cause for backend debugging
       console.error(`[Service/PageRetriever] Fetch error cause for URL ${url}:`, JSON.stringify(error.cause, Object.getOwnPropertyNames(error.cause)));
-    } else if (error.cause) { // If cause is not an object but exists (e.g., a string)
+    } else if (error.cause) {
         detailedErrorMessage = `Network error. Cause: ${String(error.cause)}`;
         console.error(`[Service/PageRetriever] Fetch error cause (non-object) for URL ${url}: ${String(error.cause)}`);
     }
@@ -118,8 +122,8 @@ export async function retrievePageContent(url: string): Promise<PageContentResul
     return {
       html: null,
       error: detailedErrorMessage,
-      finalUrl: url, // Request failed before determining the final URL
-      status: undefined // No HTTP status code
+      finalUrl: url,
+      status: undefined
     };
   }
 }
@@ -168,9 +172,9 @@ export async function retrieveRobotsTxt(baseUrl: string): Promise<string | null>
   } catch (error: any) {
     clearTimeout(timeoutId);
     console.error(`[Service/PageRetriever] Error fetching robots.txt for ${baseUrl}:`, error);
-     if (error.name === 'AbortError' || (error.cause && error.cause.name === 'TimeoutError')) { // TimeoutError for Node 18+
+     if (error.name === 'AbortError' || (error.cause && error.cause.name === 'TimeoutError')) {
       console.warn(`[Service/PageRetriever] Request for robots.txt timed out for ${baseUrl}.`);
-      return null; // Timeout is not a critical error for robots.txt
+      return null;
     }
     let detailedErrorMessage = error.message || 'Unknown error fetching robots.txt.';
      if (error.cause && typeof error.cause === 'object') {
