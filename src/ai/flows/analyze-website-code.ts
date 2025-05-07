@@ -9,18 +9,24 @@
  */
 
 import {ai} from '@/ai/genkit';
-import {z} from 'genkit';
-import {retrievePageContent} from '@/services/page-retriever'; 
+import {z}  from 'genkit';
+import {retrievePageContent} from '@/services/page-retriever';
+import { detectWithSignatures, type DetectedTechnologyInfo as SignatureDetectedTechInfo } from '@/lib/signatures';
 
 // Define the schema for detected technologies
 const DetectedTechnologySchema = z.object({
+  id: z.string().optional().describe('An identifier for the detection rule or signature if applicable.'), // From signature or AI
   technology: z.string().describe('The name of the detected technology, library, or framework.'),
   version: z.string().optional().describe('The detected version of the technology, if identifiable.'),
   confidence: z.number().min(0).max(1).describe('The confidence score (0.0 to 1.0) of this detection.'),
-  isHarmful: z.boolean().describe('Whether this technology, in its detected form or version, poses a direct security risk or is often associated with vulnerabilities.'),
-  detectionMethod: z.string().optional().describe('Brief description of how this technology was identified (e.g., "script tag", "global variable", "HTML comment", "code pattern in minified script"). Useful for understanding detections in obfuscated code.'),
+  isHarmful: z.boolean().optional().describe('Whether this technology, in its detected form or version, poses a direct security risk or is often associated with vulnerabilities. Can be determined by AI.'),
+  detectionMethod: z.string().describe('Brief description of how this technology was identified (e.g., "Signature: React (scriptSrc)", "AI: Inferred from global variable pattern", "AI: HTML comment analysis", "AI: Code pattern in minified script").'),
   category: z.string().optional().describe('A category for the technology (e.g., "JavaScript Framework", "Analytics", "CMS", "Web Server", "CDN", "UI Library", "Payment Processor", "Security"). Standardize these as much as possible.'),
+  matchedValue: z.string().optional().describe('The actual string value from the source code or headers that matched a pattern or was used for inference.'),
+  website: z.string().optional().describe('Official website of the technology, if known.'),
 });
+export type DetectedTechnology = z.infer<typeof DetectedTechnologySchema>;
+
 
 const AnalyzeWebsiteCodeInputSchema = z.object({
   url: z.string().url().describe('The URL of the website to analyze.'),
@@ -82,34 +88,54 @@ const retrievePageContentTool = ai.defineTool(
   }
 );
 
+// New input schema for the prompt, which now includes pre-detected technologies by signatures
+const AnalyzeWebsiteCodePromptInputSchema = z.object({
+  url: z.string().url(),
+  htmlContent: z.string().describe('The HTML content of the page.'),
+  signatureBasedDetections: z.array(DetectedTechnologySchema).describe('Technologies already detected by initial signature scanning. Use this to guide and augment your analysis, not just repeat it. Focus on finding *additional* technologies or confirming/refining these with more evidence, especially from obfuscated code or behavioral patterns not covered by simple signatures.')
+});
+
 
 const analyzeWebsiteCodePrompt = ai.definePrompt({
   name: 'analyzeWebsiteCodePrompt',
-  input: {schema: AnalyzeWebsiteCodeInputSchema},
+  input: {schema: AnalyzeWebsiteCodePromptInputSchema }, // Use the new schema
   output: {schema: AnalyzeWebsiteCodeOutputSchema},
-  tools: [retrievePageContentTool],
-  system: `You are an AI expert in website security and advanced technology stack identification, designed to be more comprehensive than tools like Wappalyzer.
-Your primary goal is to analyze the provided HTML content of a website (obtained via the retrievePageContent tool) and identify:
-1.  A comprehensive list of specific technologies used. This includes, but is not limited to:
-    *   JavaScript frameworks and libraries (e.g., React, Angular, Vue, jQuery, Svelte, Next.js, Nuxt.js, Ember.js, Backbone.js, Preact)
-    *   UI libraries and frameworks (e.g., Bootstrap, Tailwind CSS, Materialize, Foundation, Semantic UI, Emotion, Styled Components)
-    *   Server-side technologies hinted at in the HTML (e.g., PHP, ASP.NET through specific tags or comments, though direct detection is limited)
-    *   Content Management Systems (CMS) (e.g., WordPress, Joomla, Drupal, Shopify, Wix, Squarespace, Ghost)
-    *   Analytics and tracking tools (e.g., Google Analytics, Mixpanel, Segment, Hotjar, Matomo)
-    *   Advertising networks (e.g., Google AdSense, DoubleClick)
-    *   CDNs (Content Delivery Networks) by analyzing script/stylesheet URLs if prefixes are recognizable.
-    *   Web servers or hosting platforms if indicated by specific headers or error page styles (though limited to HTML).
-    *   Font scripts and services.
-    *   Widgets and third-party embeds.
-    *   Programming languages used on the client-side (e.g. JavaScript, TypeScript if hints exist).
-    *   Build tools or bundlers if indicated by output patterns (e.g., Webpack, Parcel, Rollup).
-2.  Potential security concerns (e.g., use of outdated libraries with known vulnerabilities, missing security headers if inferable from meta tags, mixed content, exposed API keys or sensitive info in client-side code, common vulnerabilities associated with detected technologies, insecure SRI (Subresource Integrity) practices).
+  // No tools needed here as HTML is passed directly. The *flow* will use the tool.
+  system: `You are an AI expert in website security and advanced technology stack identification, designed to be significantly more comprehensive than tools like Wappalyzer.
+Your primary goal is to analyze the provided HTML content of a website and augment the list of already signature-detected technologies.
+The user has provided the URL: {{{url}}}
+The HTML content is provided.
+A list of technologies already detected by a signature-based scanner is provided in 'signatureBasedDetections'. Your role is to:
+1.  **Deeply Analyze Obfuscated/Minified Code**: Go beyond simple signatures. Examine inline scripts, minified bundles, and any obfuscated code for patterns, unique strings, or function structures that indicate specific libraries or frameworks NOT caught by the initial scan or to confirm initial scans with higher confidence from code behavior.
+2.  **Infer Technologies**: Look for:
+    *   JavaScript frameworks and libraries (e.g., React, Angular, Vue, jQuery, Svelte, Next.js, Nuxt.js, Ember.js, Backbone.js, Preact, Lodash, Underscore)
+    *   UI libraries and frameworks (e.g., Bootstrap, Tailwind CSS, Materialize, Foundation, Semantic UI, Emotion, Styled Components, Ant Design, Material-UI)
+    *   Server-side technologies hinted at in the HTML (e.g., PHP session IDs, ASP.NET viewstate, specific comments from Java frameworks like JSF/Struts).
+    *   Content Management Systems (CMS) (e.g., WordPress, Joomla, Drupal, Shopify, Wix, Squarespace, Ghost) - confirm or find if not in signatures.
+    *   Analytics and tracking tools (e.g., Google Analytics, Mixpanel, Segment, Hotjar, Matomo, Amplitude, Heap)
+    *   Advertising networks (e.g., Google AdSense, DoubleClick, Criteo)
+    *   CDNs (Content Delivery Networks) by analyzing script/stylesheet URLs if prefixes are recognizable, especially for less common CDNs.
+    *   Web servers or hosting platforms if indicated by specific headers (if available via other means, not directly in HTML) or error page styles.
+    *   Font scripts and services (e.g., Google Fonts, Adobe Fonts/Typekit).
+    *   Widgets and third-party embeds (e.g., social media widgets, payment gateways, chat widgets).
+    *   Client-side programming languages (e.g., JavaScript, TypeScript if source maps or comments exist, WebAssembly).
+    *   Build tools or bundlers indicated by output patterns (e.g., Webpack manifest, Parcel specific structures, Rollup characteristics).
+    *   Evidence of WebAssembly (.wasm file loads, specific JS interop patterns).
+    *   State management libraries (e.g., Redux, MobX, Zustand, Pinia) if global stores or specific API usage is visible.
+    *   GraphQL client libraries (e.g., Apollo Client, Relay) by looking for characteristic query patterns or cache objects.
+3.  **Identify Potential Security Concerns**: Based on your deep analysis and the identified technologies (both signature-based and newly found):
+    *   Use of outdated libraries with *known* vulnerabilities (if version is identifiable).
+    *   Missing security headers if inferable from meta tags or lack thereof (e.g., CSP, X-Frame-Options).
+    *   Mixed content (http resources on an https page).
+    *   Exposed API keys or sensitive information in client-side code (look for common key patterns).
+    *   Common vulnerabilities associated with detected technologies/versions.
+    *   Insecure SRI (Subresource Integrity) practices (missing or incorrect hashes).
+    *   Presence of known trackers or scripts associated with malware/adware (if applicable, use with caution and high confidence).
+    *   Hardcoded credentials or secrets.
+    *   Use of 'eval()' or 'document.write()' in suspicious contexts.
+    *   Verbose error messages or debug information leaked in comments or scripts.
 
-You MUST use the retrievePageContent tool first to get the HTML of the website.
-If the HTML content is null or an error occurs during retrieval, you MUST indicate that analysis cannot proceed. In this case, 'detectedTechnologies' and 'securityConcerns' arrays should be empty, and 'analysisSummary' MUST clearly state that the page could not be fetched and why (using the error message from the tool if available).
-
-**Deep Analysis Instructions:**
-Your analysis must be exceptionally thorough. Go beyond obvious declarations.
+**Deep Analysis Instructions for AI (Beyond Signatures):**
 *   **Examine Minified and Obfuscated Code:** Actively look for patterns, unique string literals, or function structures within inline <script> tags that are characteristic of specific libraries, even if the code is minified or lightly obfuscated. For example, jQuery often uses '$' or 'jQuery' globals, React might leave '__REACT_DEVTOOLS_GLOBAL_HOOK__' or specific DOM attribute patterns like 'data-reactroot'.
 *   **Fingerprinting:** Identify technologies by their "fingerprints" – unique CSS class name prefixes (e.g., 'wp-' for WordPress, 'v-' for Vue), specific HTML comment patterns, meta tags (e.g., '<meta name="generator" content="WordPress 5.x">'), inline JSON-LD, or unique IDs/structures.
 *   **Script Tag Analysis:** Analyze 'src' attributes of <script> and <link> tags. Even if you can't fetch the content, the URL structure can reveal CDNs (e.g., cdnjs, unpkg, jsdelivr) or specific services. Look for version numbers in these URLs.
@@ -118,60 +144,138 @@ Your analysis must be exceptionally thorough. Go beyond obvious declarations.
     *  Detect eval() calls or Function() constructors, which are often used to dynamically generate code. Trace the inputs to these calls if possible.
     *  Analyze variable names and string literals, even if they are obfuscated. Some obfuscation techniques leave recognizable fragments.
     *  Identify patterns in how DOM elements are created and manipulated, which might be unique to certain frameworks.
-*   **Global Variables:** Infer technologies from the presence of known library-specific global variables (e.g., window.jQuery, window.angular, window.dataLayer for Google Tag Manager).
+*   **Global Variables:** Infer technologies from the presence of known library-specific global variables (e.g., window.jQuery, window.angular, window.dataLayer for Google Tag Manager). Scan the entire HTML for 'window.*' declarations.
 *   **HTML Structure & Comments:** Look for characteristic HTML structures, data attributes ('data-*'), or revealing comments left by developers or build tools.
+*   **JSON-LD and Microdata:** Analyze structured data within the HTML for hints about platforms or specific e-commerce/content systems.
 
-**Output Formatting for Each Detected Technology:**
+**Output Formatting for Each Detected Technology (for technologies YOU newly identify or refine):**
+- "id": (Optional) Your internal identifier for this AI-driven detection rule if applicable.
 - "technology": The common name of the technology/library/framework.
 - "version": (Optional) The detected version, if identifiable (e.g., from URLs, comments, specific API usage).
-- "confidence": Your confidence score (0.0 to 1.0). Be realistic.
-- "isHarmful": A boolean. Set to true if this technology, in its detected form or version (if known), poses a direct security risk or is often associated with vulnerabilities (e.g., a known-vulnerable version of a library).
-- "detectionMethod": (Optional) A brief explanation of *how* you identified this technology. Examples: "Found 'React' in global window object", "Detected 'jQuery 3.5.1' from script tag URL", "Identified 'Bootstrap' via CSS class prefixes like 'col-md-'", "Inferred from minified code pattern matching 'lodash.debounce'". This is crucial for non-obvious detections.
-- "category": (Optional) Categorize the technology (e.g., "JavaScript Framework", "Analytics", "CMS", "UI Library", "CDN", "Payment Processor", "Security"). Try to use consistent categories.
+- "confidence": Your confidence score (0.0 to 1.0). Be realistic and higher for direct evidence.
+- "isHarmful": (Optional) A boolean. Set to true if this technology, in its detected form or version (if known), poses a direct security risk or is often associated with vulnerabilities.
+- "detectionMethod": A *detailed* explanation of *how* you identified this technology via AI reasoning. Examples: "AI: Inferred from minified code pattern matching 'lodash.debounce'", "AI: Global variable 'window.__APOLLO_CLIENT__' found", "AI: HTML comment 'Generated by XYZ Static Site Generator v2.1'", "AI: Matched webpack chunk loading pattern".
+- "category": (Optional) Categorize the technology.
+- "matchedValue": (Optional) The specific code snippet, comment, or URL part that led to your AI detection.
+- "website": (Optional) The official website of the technology.
+
+Combine your AI-driven findings with the 'signatureBasedDetections'. If your analysis confirms a signature-based detection with more detail (e.g., a more precise version, or a more confident method from code inspection), update that entry. If you find new technologies, add them.
 
 For each security concern:
-- A string describing the concern.
+- A string describing the concern, being specific about where/how it was found.
 
-If no specific technologies are confidently identified, return an empty array for detectedTechnologies.
-If no security concerns are found, return an empty array for securityConcerns.
+The 'analysisSummary' should be a concise overview of ALL findings (signatures + AI), including any difficulties encountered (e.g., "Extensive obfuscation made deep React component analysis challenging but presence confirmed by global hooks.").
 
-The 'analysisSummary' should be a concise overview of findings, including any difficulties encountered (e.g., highly obfuscated code making detailed analysis hard, or page being very simple).
-
-The user has provided the URL: {{{url}}}
-Analyze the content retrieved from this URL with the utmost diligence and depth.
+Your goal is to provide a richer, deeper analysis than signatures alone, focusing on what's *not* obvious.
+If the HTML content is null or empty, or was indicated as an error by the retriever, state that analysis cannot proceed.
 `,
 });
 
 const analyzeWebsiteCodeFlow = ai.defineFlow(
   {
     name: 'analyzeWebsiteCodeFlow',
-    inputSchema: AnalyzeWebsiteCodeInputSchema,
+    inputSchema: AnalyzeWebsiteCodeInputSchema, // Original input schema for the flow
     outputSchema: AnalyzeWebsiteCodeOutputSchema,
   },
-  async (input) => {
+  async (input): Promise<AnalyzeWebsiteCodeOutput> => {
     console.log('[AIFlow/analyzeWebsiteCodeFlow] Flow starting. Received input:', input);
-    const {output} = await analyzeWebsiteCodePrompt(input);
-    console.log('[AIFlow/analyzeWebsiteCodeFlow] Prompt output:', output);
 
-    if (!output) {
-      console.error('[AIFlow/analyzeWebsiteCodeFlow] analyzeWebsiteCodePrompt returned no output. This might indicate an LLM or tool error, or invalid API key. Check Genkit logs and tool execution.');
+    // Step 1: Retrieve page content using the tool
+    const pageContentTool = retrievePageContentTool; // alias for clarity
+    const pageContentResult = await pageContentTool({ url: input.url });
+
+    if (!pageContentResult.html || pageContentResult.error) {
+      console.warn(`[AIFlow/analyzeWebsiteCodeFlow] Failed to retrieve HTML for ${input.url}: ${pageContentResult.error || 'No HTML content'}`);
       return {
         detectedTechnologies: [],
         securityConcerns: [],
+        analysisSummary: `Failed to retrieve website content for ${input.url}. Error: ${pageContentResult.error || 'No HTML content returned.'} Analysis cannot proceed.`,
+      };
+    }
+    console.log(`[AIFlow/analyzeWebsiteCodeFlow] HTML content retrieved for ${input.url}. Length: ${pageContentResult.html.length}`);
+
+    // Step 2: Perform signature-based detection
+    let signatureDetections: DetectedTechnology[] = [];
+    try {
+      const signatureResults: SignatureDetectedTechInfo[] = detectWithSignatures({ htmlContent: pageContentResult.html });
+      signatureDetections = signatureResults.map(sr => ({
+        id: sr.id,
+        technology: sr.name,
+        version: sr.version,
+        confidence: sr.confidence,
+        isHarmful: undefined, // AI will determine this
+        detectionMethod: sr.detectionMethod,
+        category: sr.category,
+        matchedValue: sr.matchedValue,
+        website: sr.website,
+      }));
+      console.log(`[AIFlow/analyzeWebsiteCodeFlow] Signature-based detection found ${signatureDetections.length} technologies.`);
+      signatureDetections.forEach(tech => console.log(`  - Signature: ${tech.technology} (v${tech.version || 'N/A'}, conf: ${tech.confidence}) via ${tech.detectionMethod}`));
+    } catch (e) {
+      console.error('[AIFlow/analyzeWebsiteCodeFlow] Error during signature-based detection:', e);
+      // Continue with AI analysis even if signature detection fails, but log it.
+    }
+
+
+    // Step 3: Call the AI prompt with HTML and signature detections
+    const promptInput: z.infer<typeof AnalyzeWebsiteCodePromptInputSchema> = {
+        url: input.url,
+        htmlContent: pageContentResult.html,
+        signatureBasedDetections: signatureDetections,
+    };
+
+    const {output: aiOutput} = await analyzeWebsiteCodePrompt(promptInput);
+    console.log('[AIFlow/analyzeWebsiteCodeFlow] AI Prompt output:', aiOutput);
+
+    if (!aiOutput) {
+      console.error('[AIFlow/analyzeWebsiteCodeFlow] analyzeWebsiteCodePrompt returned no output. This might indicate an LLM or tool error. Check Genkit logs.');
+      return {
+        detectedTechnologies: signatureDetections, // Return at least signature detections
+        securityConcerns: [],
         analysisSummary:
-          'Analysis failed: The AI model did not return a valid output. This could be due to an issue with the AI model or the connection to it. Please check system logs or Genkit monitoring for more details.',
+          'AI analysis failed: The AI model did not return a valid output. Displaying signature-based detections only. This could be due to an issue with the AI model or the connection to it.',
       };
     }
     
-    // Log if fetching failed based on a conventional summary or lack of data
-    if (output.analysisSummary.includes("Failed to fetch") || output.analysisSummary.includes("cannot proceed") || output.analysisSummary.includes("unable to fetch")) {
-        console.warn(`[AIFlow/analyzeWebsiteCodeFlow] Page fetching failed or could not proceed for ${input.url}. Summary: ${output.analysisSummary}`);
-    } else if (output.detectedTechnologies.length === 0 && output.securityConcerns.length === 0) {
-        console.log(`[AIFlow/analyzeWebsiteCodeFlow] Analysis for ${input.url} completed. No specific technologies or critical security concerns were identified by the AI.`);
-    } else {
-        console.log(`[AIFlow/analyzeWebsiteCodeFlow] Analysis for ${input.url} successful. Detected ${output.detectedTechnologies.length} technologies and ${output.securityConcerns.length} concerns. Summary: ${output.analysisSummary}`);
-    }
-    console.log('[AIFlow/analyzeWebsiteCodeFlow] Returning output:', output);
-    return output;
+    // Combine AI results with signature results, prioritizing AI for overlapping entries if AI provides more/better info
+    const finalDetectedTechnologies = new Map<string, DetectedTechnology>();
+
+    // Add signature detections first
+    signatureDetections.forEach(tech => {
+        finalDetectedTechnologies.set(tech.technology.toLowerCase(), tech);
+    });
+
+    // Add or update with AI detections
+    // The AI prompt asks it to augment/refine, so we expect its output to already consider the signatures
+    // However, we'll still merge carefully here.
+    aiOutput.detectedTechnologies.forEach(aiTech => {
+        const key = aiTech.technology.toLowerCase();
+        const existing = finalDetectedTechnologies.get(key);
+        if (existing) {
+            // AI might provide better confidence, version, or harmful status.
+            // Prioritize AI's assessment if it's more detailed or confident.
+            // The AI is instructed to refine, so its output for an existing tech should ideally be an improvement.
+            finalDetectedTechnologies.set(key, {
+                ...existing, // Keep original signature data as base
+                ...aiTech,  // Override with AI's specifics
+                confidence: Math.max(existing.confidence, aiTech.confidence), // Take higher confidence
+                version: aiTech.version || existing.version, // Prefer AI's version, fallback to signature's
+                detectionMethod: `${existing.detectionMethod} & ${aiTech.detectionMethod}`, // Combine methods if both exist
+            });
+        } else {
+            finalDetectedTechnologies.set(key, aiTech);
+        }
+    });
+    
+    const combinedOutput: AnalyzeWebsiteCodeOutput = {
+        detectedTechnologies: Array.from(finalDetectedTechnologies.values()),
+        securityConcerns: aiOutput.securityConcerns || [],
+        analysisSummary: aiOutput.analysisSummary || 'Analysis summary not provided by AI.',
+    };
+
+    console.log(`[AIFlow/analyzeWebsiteCodeFlow] Combined analysis for ${input.url} successful. Detected ${combinedOutput.detectedTechnologies.length} unique technologies and ${combinedOutput.securityConcerns.length} concerns. Summary: ${combinedOutput.analysisSummary}`);
+    combinedOutput.detectedTechnologies.forEach(tech => console.log(`  - Final: ${tech.technology} (v${tech.version || 'N/A'}, conf: ${tech.confidence}) via ${tech.detectionMethod}`));
+
+    return combinedOutput;
   }
 );
