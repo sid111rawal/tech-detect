@@ -1,4 +1,3 @@
-
 'use server';
 
 export interface PageContentResult {
@@ -47,10 +46,7 @@ export async function retrievePageContent(url: string): Promise<PageContentResul
     });
 
     let cookiesFromHeader: string | undefined;
-    const setCookieHeader = response.headers.get('set-cookie'); // This might only get the first if multiple
-    // For multiple Set-Cookie headers, a more robust approach might be needed depending on environment
-    // For Node.js `fetch`, `response.headers.raw()['set-cookie']` would give an array.
-    // Browsers typically combine them. For now, assume `get` gives a usable string.
+    const setCookieHeader = response.headers.get('set-cookie');
     if (setCookieHeader) {
         cookiesFromHeader = setCookieHeader;
     }
@@ -58,8 +54,15 @@ export async function retrievePageContent(url: string): Promise<PageContentResul
 
     if (!response.ok) {
       console.error(`[Service/PageRetriever] Failed to fetch URL ${url}: ${response.status} ${response.statusText}`);
+      // Attempt to read body for error pages if possible, but prioritize error message
+      let errorHtml: string | null = null;
+      try {
+        errorHtml = await response.text();
+      } catch (textError) {
+        console.warn(`[Service/PageRetriever] Could not read error response body for ${url}:`, textError);
+      }
       return {
-        html: null,
+        html: errorHtml, // May contain error details from the server
         error: `Failed to fetch: ${response.status} ${response.statusText}`,
         status: response.status,
         headers: responseHeaders,
@@ -69,8 +72,8 @@ export async function retrievePageContent(url: string): Promise<PageContentResul
 
     const contentType = response.headers.get('content-type');
     if (!contentType || !contentType.includes('text/html')) {
-        console.warn(`[Service/PageRetriever] URL ${url} returned non-HTML content-type: ${contentType}`);
-        // Allow processing non-HTML for header/cookie based detection, but HTML dependent patterns will fail.
+        console.warn(`[Service/PageRetriever] URL ${url} returned non-HTML content-type: ${contentType}. Content will be processed, but HTML-specific signatures might not match.`);
+        // Still attempt to get text content for non-HTML types, as some signatures might work on headers/cookies or generic text patterns.
     }
 
     const textContent = await response.text();
@@ -84,11 +87,40 @@ export async function retrievePageContent(url: string): Promise<PageContentResul
     };
   } catch (error: any) {
     clearTimeout(timeoutId);
-    console.error(`[Service/PageRetriever] Error fetching URL ${url}:`, error);
+    console.error(`[Service/PageRetriever] Error fetching URL ${url}:`, error); // Log the full error object
+
     if (error.name === 'AbortError' || (error.cause && error.cause.name === 'TimeoutError')) {
-      return { html: null, error: 'Request timed out while fetching content.' };
+      return { html: null, error: 'Request timed out while fetching content.', finalUrl: url, status: undefined };
     }
-    return { html: null, error: error.message || 'Unknown error fetching content' };
+
+    let detailedErrorMessage = error.message || 'Unknown error fetching content.'; // Default to "fetch failed" or similar
+
+    // Attempt to get more specific details from error.cause, common in Node.js fetch
+    if (error.cause && typeof error.cause === 'object') {
+      const cause = error.cause as any;
+      if (cause.code) { // System-level error codes like ENOTFOUND, ECONNREFUSED
+        detailedErrorMessage = `Network error: ${cause.code}. Please check server connectivity and DNS resolution.`;
+        if (cause.code === 'ENOTFOUND') {
+            detailedErrorMessage = `DNS resolution failed for the host: ${new URL(url).hostname}. Ensure the domain is correct and reachable.`;
+        } else if (cause.code === 'ECONNREFUSED') {
+            detailedErrorMessage = `Connection refused by the server at ${new URL(url).hostname}. The server might be down or blocking requests.`;
+        }
+      } else if (cause.message) {
+        detailedErrorMessage = `Network error details: ${cause.message}.`;
+      }
+      // Log the full cause for backend debugging
+      console.error(`[Service/PageRetriever] Fetch error cause for URL ${url}:`, JSON.stringify(error.cause, Object.getOwnPropertyNames(error.cause)));
+    } else if (error.cause) { // If cause is not an object but exists (e.g., a string)
+        detailedErrorMessage = `Network error. Cause: ${String(error.cause)}`;
+        console.error(`[Service/PageRetriever] Fetch error cause (non-object) for URL ${url}: ${String(error.cause)}`);
+    }
+    
+    return {
+      html: null,
+      error: detailedErrorMessage,
+      finalUrl: url, // Request failed before determining the final URL
+      status: undefined // No HTTP status code
+    };
   }
 }
 
@@ -136,9 +168,23 @@ export async function retrieveRobotsTxt(baseUrl: string): Promise<string | null>
   } catch (error: any) {
     clearTimeout(timeoutId);
     console.error(`[Service/PageRetriever] Error fetching robots.txt for ${baseUrl}:`, error);
-     if (error.name === 'AbortError' || (error.cause && error.cause.name === 'TimeoutError')) {
+     if (error.name === 'AbortError' || (error.cause && error.cause.name === 'TimeoutError')) { // TimeoutError for Node 18+
+      console.warn(`[Service/PageRetriever] Request for robots.txt timed out for ${baseUrl}.`);
       return null; // Timeout is not a critical error for robots.txt
     }
+    let detailedErrorMessage = error.message || 'Unknown error fetching robots.txt.';
+     if (error.cause && typeof error.cause === 'object') {
+      const cause = error.cause as any;
+      if (cause.code) { 
+        detailedErrorMessage = `Network error fetching robots.txt: ${cause.code}.`;
+      } else if (cause.message) {
+        detailedErrorMessage = `Network error details (robots.txt): ${cause.message}.`;
+      }
+      console.error(`[Service/PageRetriever] Fetch robots.txt error cause for URL ${robotsUrl}:`, JSON.stringify(error.cause, Object.getOwnPropertyNames(error.cause)));
+    } else if (error.cause) {
+        detailedErrorMessage = `Network error (robots.txt). Cause: ${String(error.cause)}`;
+    }
+    console.warn(`[Service/PageRetriever] Non-timeout error fetching robots.txt for ${baseUrl}: ${detailedErrorMessage}`);
     return null;
   }
 }
