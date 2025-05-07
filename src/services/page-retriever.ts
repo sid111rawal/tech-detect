@@ -12,6 +12,7 @@ export interface PageContent {
  * @returns A promise that resolves to an object containing the HTML or an error message.
  */
 export async function retrievePageContent(url: string): Promise<PageContent> {
+  console.log('[Service/PageRetriever] Attempting to fetch content for URL:', url);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds timeout
 
@@ -28,25 +29,27 @@ export async function retrievePageContent(url: string): Promise<PageContent> {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      console.error(`Failed to fetch URL ${url}: ${response.status} ${response.statusText}`);
+      console.error(`[Service/PageRetriever] Failed to fetch URL ${url}: ${response.status} ${response.statusText}`);
       return { html: null, error: `Failed to fetch: ${response.status} ${response.statusText}` };
     }
 
     const contentType = response.headers.get('content-type');
     if (!contentType || !contentType.includes('text/html')) {
-        console.warn(`URL ${url} returned non-HTML content-type: ${contentType}`);
+        console.warn(`[Service/PageRetriever] URL ${url} returned non-HTML content-type: ${contentType}`);
         // Depending on strictness, you might want to return an error or try to parse anyway
         // For now, we'll proceed but this is a potential point of failure for non-HTML pages
     }
 
     const textContent = await response.text();
+    console.log(`[Service/PageRetriever] Successfully fetched content for URL: ${url} (Content length: ${textContent.length})`);
     return { html: textContent };
   } catch (error: any) {
     clearTimeout(timeoutId);
-    console.error(`Error fetching URL ${url}:`, error);
+    console.error(`[Service/PageRetriever] Error fetching URL ${url}:`, error);
     if (error.name === 'AbortError') {
       return { html: null, error: 'Request timed out while fetching content.' };
     }
     return { html: null, error: error.message || 'Unknown error fetching content' };
   }
 }
+

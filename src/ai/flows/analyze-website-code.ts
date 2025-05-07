@@ -31,6 +31,7 @@ const AnalyzeWebsiteCodeOutputSchema = z.object({
 export type AnalyzeWebsiteCodeOutput = z.infer<typeof AnalyzeWebsiteCodeOutputSchema>;
 
 export async function analyzeWebsiteCode(input: AnalyzeWebsiteCodeInput): Promise<AnalyzeWebsiteCodeOutput> {
+  console.log('[AIFlow] analyzeWebsiteCode (exported function) called with input:', input);
   return analyzeWebsiteCodeFlow(input);
 }
 
@@ -47,7 +48,10 @@ const getWebsiteHtmlTool = ai.defineTool(
     }),
   },
   async (input: { url: string }): Promise<PageContent> => {
-    return retrievePageContent(input.url);
+    console.log('[AITool/getWebsiteHtml] Tool called with input:', input);
+    const result = await retrievePageContent(input.url);
+    console.log('[AITool/getWebsiteHtml] retrievePageContent result:', result);
+    return result;
   }
 );
 
@@ -61,15 +65,18 @@ const technologyDetectionTool = ai.defineTool({
   outputSchema: TechnologyReportSchema,
 },
 async (toolInput) => {
+    console.log('[AITool/detectTechnology] Tool called with input:', toolInput);
     // Placeholder implementation - In a real scenario, this tool would analyze the htmlSnippet
     // possibly using more sophisticated methods or another AI model specialized in code analysis.
     // For now, it returns a generic response based on the suspected technology.
     const confidence = Math.random() * (0.9 - 0.5) + 0.5; // Random confidence between 0.5 and 0.9
-    return {
+    const result = {
       technology: toolInput.suspectedTechnology,
       confidence: parseFloat(confidence.toFixed(2)),
       isHarmful: false, // Placeholder: actual harm detection is complex
     };
+    console.log('[AITool/detectTechnology] Tool returning result:', result);
+    return result;
   }
 );
 
@@ -117,16 +124,19 @@ const analyzeWebsiteCodeFlow = ai.defineFlow(
     outputSchema: AnalyzeWebsiteCodeOutputSchema,
   },
   async (input) => { 
+    console.log('[AIFlow/analyzeWebsiteCodeFlow] Flow started with input:', input);
     const {output} = await analyzeWebsiteCodePrompt(input);
+    console.log('[AIFlow/analyzeWebsiteCodeFlow] Prompt output:', output);
 
     if (!output) {
-      console.error('analyzeWebsiteCodePrompt returned no output. This might indicate an LLM or tool error, or invalid API key. Check Genkit logs and tool execution.');
+      console.error('[AIFlow/analyzeWebsiteCodeFlow] analyzeWebsiteCodePrompt returned no output. This might indicate an LLM or tool error, or invalid API key. Check Genkit logs and tool execution.');
       // Construct a valid error output according to the schema
       return {
         detectedTechnologies: [],
         securityConcerns: ['AI analysis failed to produce a structured output. The AI model may have encountered an internal error or failed to follow instructions. Please check server logs.'],
       };
     }
+    console.log('[AIFlow/analyzeWebsiteCodeFlow] Flow finished, returning output:', output);
     return output;
   }
 );
