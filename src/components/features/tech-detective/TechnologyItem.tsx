@@ -4,7 +4,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Code2, ShieldAlert, ShieldCheck, Puzzle, Info, LinkIcon, FileText, SearchCode } from "lucide-react";
+import { Code2, ShieldAlert, ShieldCheck, Puzzle, Info, LinkIcon, FileText, SearchCode, Package } from "lucide-react";
 import type { DetectedTechnology } from '@/ai/flows/analyze-website-code';
 import {
   Accordion,
@@ -12,24 +12,50 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import Image from 'next/image';
 
 interface TechnologyItemProps {
   technology: DetectedTechnology;
 }
 
 export function TechnologyItem({ technology }: TechnologyItemProps) {
-  const confidencePercentage = Math.round(technology.confidence * 100);
+  const confidencePercentage = Math.round((technology.confidence || 0) * 100);
+
+  const getIcon = () => {
+    if (technology.icon) {
+      // Assuming icons are in public/icons/ and are SVGs named like "React.svg"
+      // This path needs to be resolvable by Next.js Image component
+      const iconPath = `/icons/${technology.icon}`; 
+      return (
+        <Image 
+          src={iconPath} 
+          alt={`${technology.technology} icon`} 
+          width={20} 
+          height={20}
+          className="mr-2 flex-shrink-0"
+          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} // Hide if image fails to load
+        />
+      );
+    }
+    // Fallback Lucide icon based on category or a generic one
+    if (technology.category?.toLowerCase().includes('security')) return <ShieldAlert className="h-5 w-5 text-destructive flex-shrink-0" />;
+    if (technology.category?.toLowerCase().includes('framework') || technology.category?.toLowerCase().includes('library')) return <Code2 className="h-5 w-5 text-blue-500 flex-shrink-0" />;
+    return <Package className="h-5 w-5 text-muted-foreground flex-shrink-0" />;
+  };
+
 
   return (
     <Card className="bg-card/70 hover:shadow-lg transition-shadow duration-200 flex flex-col">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between mb-1">
-          <CardTitle className="text-lg flex items-center gap-2 truncate" title={technology.technology}>
-            {technology.isHarmful ? <ShieldAlert className="h-5 w-5 text-destructive flex-shrink-0" /> : <ShieldCheck className="h-5 w-5 text-green-600 flex-shrink-0" />}
+          <CardTitle className="text-lg flex items-center gap-1 truncate" title={technology.technology}>
+            {getIcon()}
+            {technology.isHarmful && !technology.category?.toLowerCase().includes('security') ? <ShieldAlert className="h-5 w-5 text-destructive flex-shrink-0" /> : null}
+            {!technology.isHarmful && technology.isHarmful !== undefined && !technology.category?.toLowerCase().includes('security') ? <ShieldCheck className="h-5 w-5 text-green-600 flex-shrink-0" /> : null}
             <span className="truncate">{technology.technology || "Unknown Technology"}</span>
           </CardTitle>
           {technology.version && (
-            <Badge variant="outline" className="text-xs whitespace-nowrap ml-2">v{technology.version}</Badge>
+            <Badge variant="outline" className="text-xs whitespace-nowrap ml-2 shrink-0">v{technology.version}</Badge>
           )}
         </div>
         {technology.category && (
