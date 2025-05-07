@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Code2, ShieldAlert, ShieldCheck, Puzzle, Info, LinkIcon, FileText, SearchCode, Package } from "lucide-react";
-import type { DetectedTechnology } from '@/ai/flows/analyze-website-code';
+import type { DetectedTechnologyInfo as DetectedTechnology } from '@/lib/signatures'; // Changed import
 import {
   Accordion,
   AccordionContent,
@@ -19,7 +19,7 @@ interface TechnologyItemProps {
 }
 
 export function TechnologyItem({ technology }: TechnologyItemProps) {
-  const confidencePercentage = Math.round((technology.confidence || 0) * 100);
+  const confidencePercentage = Math.round((technology.confidence || 0)); // Confidence is already 0-100
 
   const getIcon = () => {
     if (technology.icon) {

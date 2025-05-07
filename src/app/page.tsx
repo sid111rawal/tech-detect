@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState } from 'react';
@@ -6,11 +7,11 @@ import { UrlInputForm } from '@/components/features/tech-detective/UrlInputForm'
 import { AnalysisReport } from '@/components/features/tech-detective/AnalysisReport';
 import { LoadingState } from '@/components/features/tech-detective/LoadingState';
 import { handleAnalyzeWebsite, type FormState } from './actions';
-import type { AnalyzeWebsiteCodeOutput } from '@/ai/flows/analyze-website-code';
+import type { WebsiteAnalysisResult } from '@/services/website-analysis';
 import Image from 'next/image';
 
 export default function Home() {
-  const [analysisResult, setAnalysisResult] = useState<AnalyzeWebsiteCodeOutput | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<WebsiteAnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSetAnalysisResult = (result: FormState['analysisResult'] | null) => {

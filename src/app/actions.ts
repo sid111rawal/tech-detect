@@ -2,7 +2,7 @@
 'use server';
 
 import { z } from 'zod';
-import { analyzeWebsiteCode, type AnalyzeWebsiteCodeOutput } from '@/ai/flows/analyze-website-code';
+import { analyzeWebsite, type WebsiteAnalysisResult } from '@/services/website-analysis';
 
 const AnalyzeUrlSchema = z.object({
   url: z.string().url({ message: "Invalid URL format. Please include http:// or https://" }),
@@ -10,7 +10,7 @@ const AnalyzeUrlSchema = z.object({
 
 export type FormState = {
   message: string;
-  analysisResult?: AnalyzeWebsiteCodeOutput; // This type no longer has securityConcerns
+  analysisResult?: WebsiteAnalysisResult;
   error?: boolean;
   fieldErrors?: Record<string, string[] | undefined>;
 };
@@ -38,16 +38,16 @@ export async function handleAnalyzeWebsite(
   console.log('[ActionHandler] Validation successful. Validated URL:', validationResult.data.url);
 
   try {
-    console.log('[ActionHandler] Calling analyzeWebsiteCode with URL:', validationResult.data.url);
-    const result = await analyzeWebsiteCode({ url: validationResult.data.url });
-    console.log('[ActionHandler] analyzeWebsiteCode result:', result);
+    console.log('[ActionHandler] Calling analyzeWebsite with URL:', validationResult.data.url);
+    const result = await analyzeWebsite(validationResult.data.url);
+    console.log('[ActionHandler] analyzeWebsite result:', result);
 
     if (result.error) {
         console.warn('[ActionHandler] Analysis returned an error:', result.error);
         return {
             message: result.analysisSummary || "Analysis failed with an error.",
             error: true,
-            analysisResult: result, // still pass result for potential partial data or error details
+            analysisResult: result,
         };
     }
 
@@ -69,7 +69,6 @@ export async function handleAnalyzeWebsite(
     if (error instanceof Error) {
       errorMessage = error.message;
     }
-    // Ensure an empty result or appropriate error structure is returned
     return {
       message: `Analysis error: ${errorMessage}`,
       error: true,

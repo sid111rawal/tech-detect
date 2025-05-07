@@ -1,7 +1,7 @@
 
 'use client';
 
-import type { AnalyzeWebsiteCodeOutput } from '@/ai/flows/analyze-website-code';
+import type { WebsiteAnalysisResult } from '@/services/website-analysis';
 import { TechnologyItem } from './TechnologyItem';
 // import { ConcernItem } from './ConcernItem'; // ConcernItem is no longer used
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Shield, ListChecks /* AlertOctagon */ } from 'lucide-react'; // AlertOctagon might not be needed
 
 interface AnalysisReportProps {
-  report: AnalyzeWebsiteCodeOutput;
+  report: WebsiteAnalysisResult;
 }
 
 export function AnalysisReport({ report }: AnalysisReportProps) {
@@ -25,6 +25,9 @@ export function AnalysisReport({ report }: AnalysisReportProps) {
           </div>
           <CardDescription>
             {report.analysisSummary || 'Libraries, frameworks, and other technologies identified on the website.'}
+            {report.finalUrl && report.finalUrl !== report.analysisSummary.split(" ")[2] && ( // Check if finalUrl is different from input URL
+                 <span className="block text-xs text-muted-foreground mt-1">Analyzed URL: {report.finalUrl} (Status: {report.status || 'N/A'})</span>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -38,6 +41,7 @@ export function AnalysisReport({ report }: AnalysisReportProps) {
             <div className="text-center py-8 text-muted-foreground">
               <Shield className="h-12 w-12 mx-auto mb-2 opacity-50" />
               <p>No specific technologies detected with current analysis methods.</p>
+               {report.error && <p className="text-sm text-destructive mt-2">{report.error}</p>}
             </div>
           )}
         </CardContent>
