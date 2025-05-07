@@ -1,18 +1,19 @@
+
 'use client';
 
 import type { AnalyzeWebsiteCodeOutput } from '@/ai/flows/analyze-website-code';
 import { TechnologyItem } from './TechnologyItem';
-import { ConcernItem } from './ConcernItem';
+// import { ConcernItem } from './ConcernItem'; // ConcernItem is no longer used
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
-import { Shield, ListChecks, AlertOctagon } from 'lucide-react';
+// import { Separator } from '@/components/ui/separator'; // Separator might not be needed if concerns section is removed
+import { Shield, ListChecks /* AlertOctagon */ } from 'lucide-react'; // AlertOctagon might not be needed
 
 interface AnalysisReportProps {
   report: AnalyzeWebsiteCodeOutput;
 }
 
 export function AnalysisReport({ report }: AnalysisReportProps) {
-  const { detectedTechnologies, securityConcerns } = report;
+  const { detectedTechnologies /* securityConcerns */ } = report; // securityConcerns removed
 
   return (
     <div className="space-y-8 mt-8">
@@ -23,7 +24,7 @@ export function AnalysisReport({ report }: AnalysisReportProps) {
             <CardTitle className="text-2xl">Detected Technologies</CardTitle>
           </div>
           <CardDescription>
-            Libraries, frameworks, and other technologies identified on the website.
+            {report.analysisSummary || 'Libraries, frameworks, and other technologies identified on the website.'}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -42,6 +43,8 @@ export function AnalysisReport({ report }: AnalysisReportProps) {
         </CardContent>
       </Card>
 
+      {/* Security Concerns section removed as it's no longer part of the output */}
+      {/* 
       <Separator />
 
       <Card className="shadow-xl">
@@ -68,7 +71,8 @@ export function AnalysisReport({ report }: AnalysisReportProps) {
             </div>
           )}
         </CardContent>
-      </Card>
+      </Card> 
+      */}
     </div>
   );
 }

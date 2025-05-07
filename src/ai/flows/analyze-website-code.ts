@@ -2,27 +2,28 @@
 'use server';
 /**
  * @fileOverview Flow for analyzing website code to detect technologies using signature-based methods.
+ * This flow now orchestrates calls to signature-based detection and does not use AI for analysis.
  *
  * - analyzeWebsiteCode - A function that analyzes website code.
  * - AnalyzeWebsiteCodeInput - The input type for the analyzeWebsiteCode function.
  * - AnalyzeWebsiteCodeOutput - The return type for the analyzeWebsiteCode function.
  */
 
-import {ai} from '@/ai/genkit';
+import {ai} from '@/ai/genkit'; // genkit is still used for flow definition structure
 import {z}  from 'genkit';
 import {retrievePageContent, type PageContentResult} from '@/services/page-retriever';
-import { detectTechnologies, signatures as signaturesDb } from '@/lib/signatures'; // Updated import
+import { detectTechnologies, type DetectedTechnologyInfo } from '@/lib/signatures';
 
-// Define the schema for detected technologies
+// Define the schema for detected technologies (matching DetectedTechnologyInfo from signatures.ts)
 const DetectedTechnologySchema = z.object({
-  id: z.string().optional().describe('An identifier for the detection rule or signature if applicable.'), // Made optional
+  id: z.string().optional().describe('An identifier for the detection rule or signature if applicable.'),
   technology: z.string().describe('The name of the detected technology, library, or framework.'),
-  version: z.string().optional().describe('The detected version of the technology, if identifiable.'),
-  confidence: z.number().min(0).max(1).describe('The confidence score (0.0 to 1.0) of this detection.'),
-  isHarmful: z.boolean().optional().describe('Whether this technology, in its detected form or version, poses a direct security risk or is often associated with vulnerabilities. Can be determined by AI.'),
-  detectionMethod: z.string().optional().describe('Brief description of how this technology was identified (e.g., "Signature: React (scriptSrc)", "Signature: HTML comment analysis", "Signature: Code pattern in minified script").'), // Made optional
-  category: z.string().optional().describe('A category for the technology (e.g., "JavaScript Framework", "Analytics", "CMS", "Web Server", "CDN", "UI Library", "Payment Processor", "Security"). Standardize these as much as possible.'),
-  matchedValue: z.string().optional().describe('The actual string value from the source code or headers that matched a pattern or was used for inference.'),
+  version: z.string().nullable().optional().describe('The detected version of the technology, if identifiable.'),
+  confidence: z.number().min(0).max(100).describe('The confidence score (0 to 100) of this detection.'), // Updated to 0-100
+  isHarmful: z.boolean().optional().describe('Whether this technology is considered harmful (can be manually set in signatures or by other logic).'),
+  detectionMethod: z.string().optional().describe('Brief description of how this technology was identified (e.g., "Signature: React (scriptSrc)", "Matched: Server Header").'),
+  category: z.string().optional().describe('A category for the technology (e.g., "JavaScript Framework", "Analytics", "CMS").'),
+  matchedValue: z.string().optional().describe('The actual string value from the source code or headers that matched a pattern.'),
   website: z.string().optional().describe('Official website of the technology, if known.'),
   icon: z.string().optional().describe('Filename of the technology icon (e.g., "React.svg").'),
 });
@@ -36,7 +37,7 @@ export type AnalyzeWebsiteCodeInput = z.infer<typeof AnalyzeWebsiteCodeInputSche
 
 const AnalyzeWebsiteCodeOutputSchema = z.object({
   detectedTechnologies: z.array(DetectedTechnologySchema).describe('A list of detected technologies with their details.'),
-  securityConcerns: z.array(z.string()).describe('A list of potential security concerns identified. (Currently not populated by this non-AI flow)'),
+  // securityConcerns: z.array(z.string()).describe('A list of potential security concerns identified. (This is now handled by signature rules if any)'),
   analysisSummary: z.string().describe('A brief summary of the analysis.'),
   error: z.string().optional().describe('An error message if the analysis failed at a high level.'),
 });
@@ -55,119 +56,83 @@ export async function analyzeWebsiteCode(
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return {
       detectedTechnologies: [],
-      securityConcerns: [],
+      // securityConcerns: [],
       analysisSummary: `Error during analysis: ${errorMessage}. The website content might be inaccessible or an unexpected issue occurred.`,
       error: `Error during analysis: ${errorMessage}.`
     };
   }
 }
 
-const retrievePageContentTool = ai.defineTool(
-  {
-    name: 'retrievePageContent',
-    description: 'Retrieves the HTML content, response headers, and potentially cookies of a given URL using puppeteer.',
-    inputSchema: z.object({
-      url: z.string().url().describe('The URL of the website to retrieve content from.'),
-    }),
-    outputSchema: z.object({
-        html: z.string().nullable().describe('The HTML content of the page, or null if an error occurred.'),
-        headers: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional().describe('Response headers from the server.'),
-        cookies: z.string().optional().describe('Cookies string from Set-Cookie headers or document.cookie (if applicable).'),
-        error: z.string().optional().describe('An error message if fetching failed.'),
-        status: z.number().optional().describe('HTTP status code of the response.'),
-        finalUrl: z.string().url().optional().describe('The final URL after any redirects.')
-    }),
-  },
-  async ({url}): Promise<PageContentResult> => {
-    console.log(`[Tool/retrievePageContent] Attempting to fetch with puppeteer: ${url}`);
-    try {
-      const result = await retrievePageContent(url); 
-      if (result.error) {
-        console.warn(`[Tool/retrievePageContent] Puppeteer error fetching ${url}: ${result.error}`);
-      } else {
-        console.log(`[Tool/retrievePageContent] Puppeteer successfully fetched ${url}. HTML length: ${result.html?.length}, Headers: ${Object.keys(result.headers || {}).length}`);
-      }
-      return result;
-    } catch (e: any) {
-      console.error(`[Tool/retrievePageContent] Puppeteer exception during fetch for ${url}:`, e);
-      return {html: null, error: e.message || 'Unknown error during page retrieval with puppeteer.'};
-    }
-  }
-);
+// No retrievePageContentTool needed here anymore as retrievePageContent is called directly.
 
 const analyzeWebsiteCodeFlow = ai.defineFlow(
   {
     name: 'analyzeWebsiteCodeFlow',
     inputSchema: AnalyzeWebsiteCodeInputSchema,
     outputSchema: AnalyzeWebsiteCodeOutputSchema,
+    // Removed AI model and prompt as this is now a signature-only flow
   },
   async (input): Promise<AnalyzeWebsiteCodeOutput> => {
     const flowLogPrefix = `[SignatureFlow/analyzeWebsiteCodeFlow URL: ${input.url}]`;
-    console.log(`${flowLogPrefix} Flow starting.`);
+    console.log(`${flowLogPrefix} Flow starting (Signature-Based Only).`);
 
-    const pageContentResult = await retrievePageContentTool({ url: input.url });
+    const pageContentResult: PageContentResult = await retrievePageContent(input.url);
 
-    if (!pageContentResult.html || pageContentResult.error) {
+    if (pageContentResult.error || !pageContentResult.html) {
       console.warn(`${flowLogPrefix} Failed to retrieve HTML: ${pageContentResult.error || 'No HTML content'}`);
       return {
         detectedTechnologies: [],
-        securityConcerns: [],
+        // securityConcerns: [],
         analysisSummary: `Failed to retrieve website content for ${input.url}. Error: ${pageContentResult.error || 'No HTML content returned.'} Analysis cannot proceed. (Status: ${pageContentResult.status})`,
         error: `Failed to retrieve website content for ${input.url}. Error: ${pageContentResult.error || 'No HTML content returned.'} (Status: ${pageContentResult.status})`,
       };
     }
-    console.log(`${flowLogPrefix} HTML content retrieved. Length: ${pageContentResult.html.length}. Headers received: ${!!pageContentResult.headers}, Cookies: ${!!pageContentResult.cookies}`);
+    console.log(`${flowLogPrefix} HTML content retrieved. Length: ${pageContentResult.html.length}. Headers received: ${!!pageContentResult.headers}, Cookies: ${!!pageContentResult.cookies}, Final URL: ${pageContentResult.finalUrl}`);
 
-    let signatureDetections: DetectedTechnology[] = [];
+    let signatureDetections: DetectedTechnologyInfo[] = [];
     try {
       // Use detectTechnologies from src/lib/signatures.ts
-      const detectedByCategory = detectTechnologies(pageContentResult.html, pageContentResult.headers || {});
+      // It now requires pageContentResult and finalUrl
+      signatureDetections = await detectTechnologies(pageContentResult, pageContentResult.finalUrl || input.url);
       
-      for (const category in detectedByCategory) {
-        const technologiesInCategory = detectedByCategory[category];
-        for (const tech of technologiesInCategory) {
-          // Find the original signature definition to get website/icon if available
-          let originalSignature;
-          for (const sigCategoryKey in signaturesDb) {
-              const sigArray = signaturesDb[sigCategoryKey as keyof typeof signaturesDb] as Array<any>;
-              originalSignature = sigArray.find(s => s.name === tech.name);
-              if (originalSignature) break;
-          }
-
-          signatureDetections.push({
-            id: originalSignature?.id || `${category}-${tech.name}`, // Create an ID if none
-            technology: tech.name,
-            version: tech.version || undefined,
-            confidence: tech.confidence, // Already 0-1 from detectTechnologies
-            // isHarmful: undefined, // isHarmful was AI-determined, set to undefined now.
-            detectionMethod: "Signature-based detection", // Generic method
-            category: originalSignature?.category || category,
-            // matchedValue: undefined, // Not provided by detectTechnologies in this form
-            website: originalSignature?.website,
-            icon: originalSignature?.icon,
-          });
-        }
-      }
-
       console.log(`${flowLogPrefix} Signature-based detection found ${signatureDetections.length} technologies.`);
       signatureDetections.forEach(tech => console.log(`  ${flowLogPrefix} - Signature: ${tech.technology} (v${tech.version || 'N/A'}, conf: ${tech.confidence}) via ${tech.detectionMethod}`));
+
     } catch (e: any) {
       console.error(`${flowLogPrefix} Error during signature-based detection:`, e.message, e.stack);
+      // Log the full error object for more details if available
+      if (typeof e === 'object' && e !== null) {
+          console.error(`${flowLogPrefix} Full error object:`, JSON.stringify(e, Object.getOwnPropertyNames(e)));
+      }
       return {
         detectedTechnologies: [],
-        securityConcerns: [],
-        analysisSummary: `Error during signature-based detection: ${e.message || 'Unknown error'}.`,
+        // securityConcerns: [],
+        analysisSummary: `Error during signature-based detection: ${e.message || 'Unknown error'}. Check server logs for details.`,
         error: `Error during signature-based detection: ${e.message || 'Unknown error'}.`,
       };
     }
     
-    const analysisSummary = signatureDetections.length > 0 
-        ? `Signature-based analysis complete. Detected ${signatureDetections.length} technology/technologies.`
+    const analysisSummary = signatureDetections.length > 0
+        ? `Signature-based analysis complete. Detected ${signatureDetections.length} technology/technologies for ${input.url}.`
         : `Signature-based analysis complete. No technologies detected with current signatures for ${input.url}.`;
 
+    // Map DetectedTechnologyInfo to DetectedTechnology (Zod schema type)
+    const outputTechnologies: DetectedTechnology[] = signatureDetections.map(techInfo => ({
+        id: techInfo.id,
+        technology: techInfo.technology,
+        version: techInfo.version,
+        confidence: techInfo.confidence, // Assuming confidence is already 0-100
+        isHarmful: techInfo.isHarmful,
+        detectionMethod: techInfo.detectionMethod,
+        category: techInfo.category,
+        matchedValue: techInfo.matchedValue,
+        website: techInfo.website,
+        icon: techInfo.icon,
+    }));
+
     const output: AnalyzeWebsiteCodeOutput = {
-        detectedTechnologies: signatureDetections,
-        securityConcerns: [], // No AI to generate security concerns
+        detectedTechnologies: outputTechnologies,
+        // securityConcerns: [], // No AI to generate security concerns
         analysisSummary: analysisSummary,
     };
 

@@ -3,15 +3,16 @@
 'use server';
 /**
  * @fileOverview Flow for generating a technology report for a given website based on signature analysis.
+ * This flow is now based purely on the results of the signature-based analyzeWebsiteCode flow.
  *
  * - generateTechnologyReport - A function that generates a technology report for a given website.
  * - GenerateTechnologyReportInput - The input type for the generateTechnologyReport function.
  * - GenerateTechnologyReportOutput - The return type for the generateTechnologyReport function.
  */
 
-import {ai} from '@/ai/genkit';
+import {ai} from '@/ai/genkit'; // Genkit is still used for the flow definition structure
 import {z} from 'genkit';
-import {analyzeWebsiteCode, type AnalyzeWebsiteCodeOutput} from './analyze-website-code'; // This is now the non-AI version
+import {analyzeWebsiteCode, type AnalyzeWebsiteCodeOutput} from './analyze-website-code'; // This is the non-AI version
 
 const GenerateTechnologyReportInputSchema = z.object({
   url: z.string().describe('The URL of the website to analyze.'),
@@ -22,16 +23,15 @@ export type GenerateTechnologyReportInput = z.infer<
 
 const TechnologyReportSchema = z.object({
   detectedTechnologies: z
-    .array(z.string())
+    .array(z.string()) // Just the names of technologies
     .describe('A list of detected technology names on the website.'),
-  securityConcerns: z
-    .array(z.string())
-    .describe('A list of potential security concerns for the website. (Currently empty)'),
+  // securityConcerns field is removed as it's no longer part of analyzeWebsiteCode output
   summary: z
     .string()
     .describe(
       'A summary of the detected technologies based on signature analysis.'
     ),
+  error: z.string().optional().describe("An error message if the report generation or underlying analysis failed."),
 });
 
 export type GenerateTechnologyReportOutput = z.infer<typeof TechnologyReportSchema>;
@@ -47,35 +47,35 @@ const generateTechnologyReportFlow = ai.defineFlow(
     name: 'generateTechnologyReportFlow',
     inputSchema: GenerateTechnologyReportInputSchema,
     outputSchema: TechnologyReportSchema,
+    // No AI model or prompt needed here
   },
   async (input: GenerateTechnologyReportInput): Promise<GenerateTechnologyReportOutput> => {
     const flowLogPrefix = `[SignatureReportFlow/generateReport URL: ${input.url}]`;
-    console.log(`${flowLogPrefix} Report generation flow starting.`);
+    console.log(`${flowLogPrefix} Report generation flow starting (Signature-Based Only).`);
 
     // Call the (now non-AI) analyzeWebsiteCode function
     const analysisResult: AnalyzeWebsiteCodeOutput = await analyzeWebsiteCode({ url: input.url });
+
+    if (analysisResult.error) {
+        console.warn(`${flowLogPrefix} Underlying analysis failed: ${analysisResult.error}`);
+        return {
+            detectedTechnologies: [],
+            summary: analysisResult.analysisSummary || `Report generation failed due to analysis error for ${input.url}.`,
+            error: analysisResult.error,
+        };
+    }
     
     console.log(`${flowLogPrefix} Received analysis result: ${analysisResult.detectedTechnologies.length} technologies.`);
 
     const detectedTechnologyNames = analysisResult.detectedTechnologies.map(tech => tech.technology);
     
-    // Generate a simple summary programmatically
-    let summary: string;
-    if (analysisResult.error) { // Check if analyzeWebsiteCode returned an error summary
-        summary = analysisResult.analysisSummary;
-    } else if (detectedTechnologyNames.length > 0) {
-      summary = `Signature-based analysis for ${input.url} detected ${detectedTechnologyNames.length} technology/technologies: ${detectedTechnologyNames.join(', ')}.`;
-    } else {
-      summary = `Signature-based analysis for ${input.url} did not detect any technologies with current signatures.`;
-    }
-    if(analysisResult.analysisSummary && analysisResult.analysisSummary.startsWith("Error during analysis:") || analysisResult.analysisSummary.startsWith("Failed to retrieve website content")) {
-        summary = analysisResult.analysisSummary; // Prioritize error summary from analysis
-    }
-
+    const summary = analysisResult.analysisSummary || 
+                    (detectedTechnologyNames.length > 0 
+                        ? `Signature-based analysis for ${input.url} detected ${detectedTechnologyNames.length} technology/technologies: ${detectedTechnologyNames.join(', ')}.`
+                        : `Signature-based analysis for ${input.url} did not detect any technologies with current signatures.`);
 
     const reportOutput: GenerateTechnologyReportOutput = {
       detectedTechnologies: detectedTechnologyNames,
-      securityConcerns: [], // Security concerns were AI-generated, now empty.
       summary: summary,
     };
     

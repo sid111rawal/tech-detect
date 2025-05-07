@@ -10,7 +10,7 @@ const AnalyzeUrlSchema = z.object({
 
 export type FormState = {
   message: string;
-  analysisResult?: AnalyzeWebsiteCodeOutput;
+  analysisResult?: AnalyzeWebsiteCodeOutput; // This type no longer has securityConcerns
   error?: boolean;
   fieldErrors?: Record<string, string[] | undefined>;
 };
@@ -42,16 +42,25 @@ export async function handleAnalyzeWebsite(
     const result = await analyzeWebsiteCode({ url: validationResult.data.url });
     console.log('[ActionHandler] analyzeWebsiteCode result:', result);
 
-    if (result.detectedTechnologies.length === 0 && result.securityConcerns.length === 0) {
-       console.log('[ActionHandler] Analysis complete. No specific technologies or security concerns detected.');
-       return { 
-        message: "Analysis complete. No specific technologies or security concerns detected with current methods.",
+    if (result.error) {
+        console.warn('[ActionHandler] Analysis returned an error:', result.error);
+        return {
+            message: result.analysisSummary || "Analysis failed with an error.",
+            error: true,
+            analysisResult: result, // still pass result for potential partial data or error details
+        };
+    }
+
+    if (result.detectedTechnologies.length === 0) {
+       console.log('[ActionHandler] Analysis complete. No specific technologies detected.');
+       return {
+        message: result.analysisSummary || "Analysis complete. No specific technologies detected with current methods.",
         analysisResult: result,
        };
     }
     console.log('[ActionHandler] Analysis successful with detected items.');
-    return { 
-      message: "Analysis successful!",
+    return {
+      message: result.analysisSummary || "Analysis successful!",
       analysisResult: result,
     };
   } catch (error) {
@@ -60,10 +69,11 @@ export async function handleAnalyzeWebsite(
     if (error instanceof Error) {
       errorMessage = error.message;
     }
+    // Ensure an empty result or appropriate error structure is returned
     return {
       message: `Analysis error: ${errorMessage}`,
       error: true,
+      analysisResult: { detectedTechnologies: [], analysisSummary: `Analysis error: ${errorMessage}`, error: errorMessage }
     };
   }
 }
-
