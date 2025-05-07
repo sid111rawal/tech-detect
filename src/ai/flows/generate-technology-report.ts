@@ -11,6 +11,9 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 import {analyzeWebsite, WebsiteAnalysisResult} from '@/services/website-analysis';
+// Import the detailed output schema from analyze-website-code to be used by the tool
+import {type AnalyzeWebsiteCodeOutput, AnalyzeWebsiteCodeInputSchema as AnalyzeWebsiteCodeInputSchemaInternal} from './analyze-website-code';
+
 
 const GenerateTechnologyReportInputSchema = z.object({
   url: z.string().describe('The URL of the website to analyze.'),
@@ -19,10 +22,11 @@ export type GenerateTechnologyReportInput = z.infer<
   typeof GenerateTechnologyReportInputSchema
 >;
 
+// This output schema for the report itself remains simple
 const TechnologyReportSchema = z.object({
   detectedTechnologies: z
     .array(z.string())
-    .describe('A list of detected technologies on the website.'),
+    .describe('A list of detected technology names on the website.'),
   securityConcerns: z
     .array(z.string())
     .describe('A list of potential security concerns for the website.'),
@@ -41,21 +45,16 @@ export async function generateTechnologyReport(
   return generateTechnologyReportFlow(input);
 }
 
+// The tool now uses the input schema from analyze-website-code and its output schema
+// should align with AnalyzeWebsiteCodeOutput.
+// However, the analyzeWebsite service itself has its return type defined by WebsiteAnalysisResult.
+// So, the tool's output schema will be WebsiteAnalysisResult, which is now an alias for AnalyzeWebsiteCodeOutput.
 const analyzeWebsiteTool = ai.defineTool({
   name: 'analyzeWebsite',
-  description: 'Analyzes a website to detect technologies and potential security concerns.',
-  inputSchema: z.object({
-    url: z.string().describe('The URL of the website to analyze.'),
-  }),
-  outputSchema: z.object({
-    detectedTechnologies: z
-      .array(z.string())
-      .describe('A list of detected technologies.'),
-    securityConcerns: z
-      .array(z.string())
-      .describe('A list of potential security concerns.'),
-  }),
-  async (input): Promise<WebsiteAnalysisResult> => {
+  description: 'Analyzes a website to detect technologies and potential security concerns. Returns detailed analysis.',
+  inputSchema: AnalyzeWebsiteCodeInputSchemaInternal, // Use the same input schema as analyzeWebsiteCode
+  outputSchema: z.custom<AnalyzeWebsiteCodeOutput>(), // The output is the detailed structure
+  async (input: z.infer<typeof AnalyzeWebsiteCodeInputSchemaInternal>): Promise<AnalyzeWebsiteCodeOutput> => {
     return analyzeWebsite(input.url);
   },
 });
@@ -64,24 +63,25 @@ const generateTechnologyReportPrompt = ai.definePrompt({
   name: 'generateTechnologyReportPrompt',
   tools: [analyzeWebsiteTool],
   input: {schema: GenerateTechnologyReportInputSchema},
-  output: {schema: TechnologyReportSchema},
+  output: {schema: TechnologyReportSchema}, // The final report remains simple
   prompt: `You are an AI expert in website security and technology analysis.
   Your task is to generate a concise and informative report about the technologies used on a given website and any potential security concerns.
 
-  First, use the analyzeWebsite tool to get raw data about the technologies and security concerns.  The tool returns the technologies detected on the website and any security concerns it finds.
+  First, use the analyzeWebsite tool to get detailed data about the website. The tool returns a complex object including:
+  - 'detectedTechnologies': An array of objects, where each object has details like 'technology' (name), 'version', 'confidence', 'isHarmful', 'detectionMethod', and 'category'.
+  - 'securityConcerns': An array of strings describing security issues.
+  - 'analysisSummary': A summary from the initial analysis.
 
-  Then, create a summary of the findings. The summary should highlight the most important technologies and security concerns. Structure the data into a clear and concise report that is easy to understand.
+  From the tool's output:
+  1.  Extract only the names of the detected technologies (the 'technology' field from each object in the 'detectedTechnologies' array) to form a simple list of strings for your report's "detectedTechnologies" field.
+  2.  Use the 'securityConcerns' array from the tool directly for your report's "securityConcerns" field.
+  3.  Then, create a new overall summary based on all the information from the tool (especially its 'analysisSummary' and the nature of detected items). This will be your report's "summary" field.
 
-  Make sure that the report includes the following:
-  - A list of detected technologies.
-  - A list of potential security concerns.
-  - A summary of the detected technologies and potential security concerns.
-
-  Use the following format for the report:
+  Structure your final report into the following JSON format:
   {
-    "detectedTechnologies": ["technology1", "technology2", ...],
+    "detectedTechnologies": ["technologyName1", "technologyName2", ...],
     "securityConcerns": ["concern1", "concern2", ...],
-    "summary": "A brief summary of the detected technologies and security concerns."
+    "summary": "Your newly generated brief summary of the detected technologies and potential security concerns based on the tool's detailed output."
   }
 
   The URL of the website to analyze is: {{{url}}}
@@ -99,3 +99,4 @@ const generateTechnologyReportFlow = ai.defineFlow(
     return output!;
   }
 );
+

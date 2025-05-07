@@ -10,13 +10,16 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
-import {retrievePageContent} from '@/services/page-retriever'; // Ensure this path is correct
+import {retrievePageContent} from '@/services/page-retriever'; 
 
 // Define the schema for detected technologies
 const DetectedTechnologySchema = z.object({
   technology: z.string().describe('The name of the detected technology, library, or framework.'),
+  version: z.string().optional().describe('The detected version of the technology, if identifiable.'),
   confidence: z.number().min(0).max(1).describe('The confidence score (0.0 to 1.0) of this detection.'),
   isHarmful: z.boolean().describe('Whether this technology, in its detected form or version, poses a direct security risk or is often associated with vulnerabilities.'),
+  detectionMethod: z.string().optional().describe('Brief description of how this technology was identified (e.g., "script tag", "global variable", "HTML comment", "code pattern in minified script"). Useful for understanding detections in obfuscated code.'),
+  category: z.string().optional().describe('A category for the technology (e.g., "JavaScript Framework", "Analytics", "CMS", "Web Server", "CDN", "UI Library", "Payment Processor", "Security"). Standardize these as much as possible.'),
 });
 
 const AnalyzeWebsiteCodeInputSchema = z.object({
@@ -25,7 +28,7 @@ const AnalyzeWebsiteCodeInputSchema = z.object({
 export type AnalyzeWebsiteCodeInput = z.infer<typeof AnalyzeWebsiteCodeInputSchema>;
 
 const AnalyzeWebsiteCodeOutputSchema = z.object({
-  detectedTechnologies: z.array(DetectedTechnologySchema).describe('A list of detected technologies with their confidence and harm potential.'),
+  detectedTechnologies: z.array(DetectedTechnologySchema).describe('A list of detected technologies with their details.'),
   securityConcerns: z.array(z.string()).describe('A list of potential security concerns identified from the code.'),
   analysisSummary: z.string().describe('A brief summary of the analysis, including any issues encountered (e.g., failed to fetch page).'),
 });
@@ -85,28 +88,41 @@ const analyzeWebsiteCodePrompt = ai.definePrompt({
   input: {schema: AnalyzeWebsiteCodeInputSchema},
   output: {schema: AnalyzeWebsiteCodeOutputSchema},
   tools: [retrievePageContentTool],
-  system: `You are an AI expert in website security and technology stack identification.
+  system: `You are an AI expert in website security and advanced technology stack identification, designed to be more comprehensive than tools like Wappalyzer.
 Your primary goal is to analyze the provided HTML content of a website (obtained via the retrievePageContent tool) and identify:
-1.  Specific technologies used (e.g., React, Angular, Vue, jQuery, WordPress, Shopify, specific UI libraries like Bootstrap or Tailwind CSS, analytics tools like Google Analytics, etc.). For each technology, provide its name and your confidence level (0.0 to 1.0) and whether it's potentially harmful or a security risk.
-2.  Potential security concerns (e.g., use of outdated libraries, missing security headers, mixed content, exposed API keys in client-side code, common vulnerabilities associated with detected technologies).
+1.  A comprehensive list of specific technologies used. This includes, but is not limited to:
+    *   JavaScript frameworks and libraries (e.g., React, Angular, Vue, jQuery, Svelte, Next.js, Nuxt.js, Ember.js, Backbone.js, Preact)
+    *   UI libraries and frameworks (e.g., Bootstrap, Tailwind CSS, Materialize, Foundation, Semantic UI, Emotion, Styled Components)
+    *   Server-side technologies hinted at in the HTML (e.g., PHP, ASP.NET through specific tags or comments, though direct detection is limited)
+    *   Content Management Systems (CMS) (e.g., WordPress, Joomla, Drupal, Shopify, Wix, Squarespace, Ghost)
+    *   Analytics and tracking tools (e.g., Google Analytics, Mixpanel, Segment, Hotjar, Matomo)
+    *   Advertising networks (e.g., Google AdSense, DoubleClick)
+    *   CDNs (Content Delivery Networks) by analyzing script/stylesheet URLs if prefixes are recognizable.
+    *   Web servers or hosting platforms if indicated by specific headers or error page styles (though limited to HTML).
+    *   Font scripts and services.
+    *   Widgets and third-party embeds.
+    *   Programming languages used on the client-side (e.g. JavaScript, TypeScript if hints exist).
+    *   Build tools or bundlers if indicated by output patterns (e.g., Webpack, Parcel, Rollup).
+2.  Potential security concerns (e.g., use of outdated libraries with known vulnerabilities, missing security headers if inferable from meta tags, mixed content, exposed API keys or sensitive info in client-side code, common vulnerabilities associated with detected technologies, insecure SRI (Subresource Integrity) practices).
 
 You MUST use the retrievePageContent tool first to get the HTML of the website.
-If the HTML content is null or an error occurs during retrieval, you should indicate that analysis cannot proceed due to the inability to fetch the page. In this case, the 'detectedTechnologies' and 'securityConcerns' arrays should be empty, and the 'analysisSummary' MUST clearly state that the page could not be fetched and why (using the error message from the tool if available).
+If the HTML content is null or an error occurs during retrieval, you MUST indicate that analysis cannot proceed. In this case, 'detectedTechnologies' and 'securityConcerns' arrays should be empty, and 'analysisSummary' MUST clearly state that the page could not be fetched and why (using the error message from the tool if available).
 
-Based on the HTML, perform your analysis.
-Be thorough. Look for:
-- Script tags: src attributes, inline scripts.
-- Meta tags: generator tags, framework-specific tags.
-- HTML structure: common patterns for frameworks or CMS.
-- Inline JSON-LD or microdata.
-- Comments in the code.
-- Specific CSS class names or ID patterns.
-- Presence of known library-specific global variables (e.g., \`window.jQuery\`, \`window.React\`).
+**Deep Analysis Instructions:**
+Your analysis must be exceptionally thorough. Go beyond obvious declarations.
+*   **Examine Minified and Obfuscated Code:** Actively look for patterns, unique string literals, or function structures within inline <script> tags that are characteristic of specific libraries, even if the code is minified or lightly obfuscated. For example, jQuery often uses '$' or 'jQuery' globals, React might leave '__REACT_DEVTOOLS_GLOBAL_HOOK__' or specific DOM attribute patterns like 'data-reactroot'.
+*   **Fingerprinting:** Identify technologies by their "fingerprints" – unique CSS class name prefixes (e.g., 'wp-' for WordPress, 'v-' for Vue), specific HTML comment patterns, meta tags (e.g., '<meta name="generator" content="WordPress 5.x">'), inline JSON-LD, or unique IDs/structures.
+*   **Script Tag Analysis:** Analyze 'src' attributes of <script> and <link> tags. Even if you can't fetch the content, the URL structure can reveal CDNs (e.g., cdnjs, unpkg, jsdelivr) or specific services. Look for version numbers in these URLs.
+*   **Global Variables:** Infer technologies from the presence of known library-specific global variables (e.g., window.jQuery, window.angular, window.dataLayer for Google Tag Manager).
+*   **HTML Structure & Comments:** Look for characteristic HTML structures, data attributes ('data-*'), or revealing comments left by developers or build tools.
 
-For each detected technology:
-- "technology": Name of the technology/library/framework.
-- "confidence": Your confidence score (0.0 to 1.0) in this detection.
-- "isHarmful": A boolean indicating if this technology, in its detected form or version (if known), poses a direct security risk or is often associated with vulnerabilities (e.g., a known-vulnerable version of a library).
+**Output Formatting for Each Detected Technology:**
+- "technology": The common name of the technology/library/framework.
+- "version": (Optional) The detected version, if identifiable (e.g., from URLs, comments, specific API usage).
+- "confidence": Your confidence score (0.0 to 1.0). Be realistic.
+- "isHarmful": A boolean. Set to true if this technology, in its detected form or version (if known), poses a direct security risk or is often associated with vulnerabilities (e.g., a known-vulnerable version of a library).
+- "detectionMethod": (Optional) A brief explanation of *how* you identified this technology. Examples: "Found 'React' in global window object", "Detected 'jQuery 3.5.1' from script tag URL", "Identified 'Bootstrap' via CSS class prefixes like 'col-md-'", "Inferred from minified code pattern matching 'lodash.debounce'". This is crucial for non-obvious detections.
+- "category": (Optional) Categorize the technology (e.g., "JavaScript Framework", "Analytics", "CMS", "UI Library", "CDN", "Payment Processor", "Security"). Try to use consistent categories.
 
 For each security concern:
 - A string describing the concern.
@@ -114,8 +130,10 @@ For each security concern:
 If no specific technologies are confidently identified, return an empty array for detectedTechnologies.
 If no security concerns are found, return an empty array for securityConcerns.
 
+The 'analysisSummary' should be a concise overview of findings, including any difficulties encountered (e.g., highly obfuscated code making detailed analysis hard, or page being very simple).
+
 The user has provided the URL: {{{url}}}
-Analyze the content retrieved from this URL.
+Analyze the content retrieved from this URL with the utmost diligence and depth.
 `,
 });
 
@@ -127,7 +145,6 @@ const analyzeWebsiteCodeFlow = ai.defineFlow(
   },
   async (input) => {
     console.log('[AIFlow/analyzeWebsiteCodeFlow] Flow starting. Received input:', input);
-    console.log('[AIFlow/analyzeWebsiteCodeFlow] Flow started with input:', input);
     const {output} = await analyzeWebsiteCodePrompt(input);
     console.log('[AIFlow/analyzeWebsiteCodeFlow] Prompt output:', output);
 
@@ -153,3 +170,4 @@ const analyzeWebsiteCodeFlow = ai.defineFlow(
     return output;
   }
 );
+
