@@ -10,7 +10,9 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
-import {analyzeWebsite, WebsiteAnalysisResult} from '@/services/website-analysis';
+// The analyzeWebsite service is not directly used in this flow after refactor,
+// but the technologyDetectionTool is still available to the prompt.
+// import {analyzeWebsite, WebsiteAnalysisResult} from '@/services/website-analysis';
 
 const AnalyzeWebsiteCodeInputSchema = z.object({
   url: z.string().describe('The URL of the website to analyze.'),
@@ -19,7 +21,7 @@ export type AnalyzeWebsiteCodeInput = z.infer<typeof AnalyzeWebsiteCodeInputSche
 
 const TechnologyReportSchema = z.object({
   technology: z.string().describe('The detected technology or library.'),
-  confidence: z.number().describe('Confidence level of the detection (0-1).'),
+  confidence: z.number().min(0).max(1).describe('Confidence level of the detection (0-1).'),
   isHarmful: z.boolean().describe('Whether the detected technology is potentially harmful.'),
 });
 
@@ -35,77 +37,72 @@ export async function analyzeWebsiteCode(input: AnalyzeWebsiteCodeInput): Promis
 
 const technologyDetectionTool = ai.defineTool({
   name: 'detectTechnology',
-  description: 'Detects a technology or library used by the website.',
+  description: 'Detects a technology or library used by the website, given a code snippet. Call this for each technology you suspect based on overall website analysis.',
   inputSchema: z.object({
-    codeSnippet: z.string().describe('A snippet of code from the website.'),
+    codeSnippet: z.string().describe('A relevant snippet of code from the website that suggests a particular technology. The LLM must infer or identify this snippet first.'),
+    suspectedTechnology: z.string().describe('The name of the technology suspected to be present based on the code snippet.')
   }),
-  outputSchema: z.object({
-    technology: z.string().describe('The detected technology or library.'),
-    confidence: z.number().describe('Confidence level of the detection (0-1).'),
-    isHarmful: z.boolean().describe('Whether the detected technology is potentially harmful.'),
-  }),
+  outputSchema: TechnologyReportSchema,
 },
-async (input) => {
-    // Placeholder implementation - replace with actual AI-powered detection logic
-    // This tool should analyze the codeSnippet and identify technologies, confidence, and potential harm.
+async (toolInput) => {
+    // Placeholder implementation - In a real scenario, this tool would analyze the codeSnippet
+    // possibly using more sophisticated methods or another AI model specialized in code analysis.
+    // For now, it returns a generic response based on the suspected technology.
+    // A more advanced version could try to determine confidence and harmfulness more accurately.
+    const confidence = Math.random() * (0.9 - 0.5) + 0.5; // Random confidence between 0.5 and 0.9
     return {
-      technology: 'ExampleTechnology',
-      confidence: 0.75,
-      isHarmful: false,
+      technology: toolInput.suspectedTechnology,
+      confidence: parseFloat(confidence.toFixed(2)),
+      isHarmful: false, // Placeholder: actual harm detection is complex
     };
   }
 );
 
 const analyzeWebsiteCodePrompt = ai.definePrompt({
   name: 'analyzeWebsiteCodePrompt',
-  input: {schema: AnalyzeWebsiteCodeInputSchema},
+  input: {schema: AnalyzeWebsiteCodeInputSchema}, // Expects { url: string }
   output: {schema: AnalyzeWebsiteCodeOutputSchema},
   tools: [technologyDetectionTool],
-  prompt: `You are an expert in website security and code analysis. Your task is to analyze a website to identify technologies and potential security concerns.
-
-  Analyze the provided website and its code to detect any hidden or obfuscated libraries and frameworks.
-  Pay close attention to any unusual or potentially harmful technologies.
-
-  Consider these factors:
-  - Code patterns and signatures
-  - Network requests and behaviors
-  - DOM changes during runtime
+  prompt: `You are an expert in website security and code analysis. Your task is to analyze the website at the given URL to identify technologies and potential security concerns.
 
   Website URL: {{{url}}}
 
-  Based on your analysis, provide a list of detected technologies, their confidence levels, and whether they are potentially harmful.  Also, list any security concerns identified.
+  Perform a thorough analysis of the website. Consider factors like:
+  - HTML structure and meta tags
+  - JavaScript files and global variables
+  - Network requests made by the site
+  - HTTP headers
+  - Known signatures of common libraries and frameworks
 
-  If you identify a technology, use the detectTechnology tool to get more information about it.
+  Based on your overall analysis of the website at the URL:
+  1. Identify potential technologies (libraries, frameworks, CMS, etc.) used.
+  2. For each significant technology you identify, try to find or infer a representative code snippet or pattern from your understanding of how that technology is typically used or exposed on a website.
+  3. Then, use the 'detectTechnology' tool, providing that snippet and the suspected technology name, to get a detailed report (technology name, confidence, isHarmful).
+  4. Compile a list of these detailed technology reports for the 'detectedTechnologies' field.
+  5. Identify and list any potential security concerns in the 'securityConcerns' field. These could be related to outdated software, insecure configurations, mixed content, vulnerable libraries, etc.
+
+  Ensure your final output strictly adheres to the required JSON schema.
+  If no specific technologies or security concerns are confidently identified, return empty arrays for the respective fields.
 `,
 });
 
 const analyzeWebsiteCodeFlow = ai.defineFlow(
   {
     name: 'analyzeWebsiteCodeFlow',
-    inputSchema: AnalyzeWebsiteCodeInputSchema,
+    inputSchema: AnalyzeWebsiteCodeInputSchema, // Flow input: { url: string }
     outputSchema: AnalyzeWebsiteCodeOutputSchema,
   },
-  async input => {
-    const websiteAnalysis: WebsiteAnalysisResult = await analyzeWebsite(input.url);
+  async (input) => { // `input` here is AnalyzeWebsiteCodeInput
+    // The analyzeWebsiteCodePrompt is designed to take the URL,
+    // perform analysis (potentially using its tools), and return
+    // data matching AnalyzeWebsiteCodeOutputSchema.
+    const {output} = await analyzeWebsiteCodePrompt(input);
 
-    // Example of using the technologyDetectionTool
-    const technologyReports = await Promise.all(
-      websiteAnalysis.detectedTechnologies.map(async technology => {
-        // In a real implementation, we'd fetch actual code snippets related to the technology.
-        const codeSnippet = `Example code snippet for ${technology}`;
-        return await technologyDetectionTool({
-          codeSnippet,
-        });
-      })
-    );
-
-    const {output} = await analyzeWebsiteCodePrompt({
-      ...input,
-    });
-
-    return {
-      detectedTechnologies: technologyReports,
-      securityConcerns: websiteAnalysis.securityConcerns,
-    };
+    if (!output) {
+      // This should ideally be caught by Genkit's schema validation if the LLM returns malformed/null output
+      console.error('analyzeWebsiteCodePrompt returned no output. This might indicate an LLM or tool error, or invalid API key.');
+      throw new Error('AI analysis failed to produce a structured output. Ensure the AI model can fulfill the request, use tools correctly, and the API key is valid.');
+    }
+    return output;
   }
 );
