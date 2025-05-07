@@ -1,7 +1,9 @@
+
 'use client';
 
 import { useEffect } from 'react';
-import { useFormState, useFormStatus } from 'react-dom';
+import { useActionState } from 'react';
+import { useFormStatus } from 'react-dom';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -41,7 +43,7 @@ function SubmitButton() {
 
 export function UrlInputForm({ onAnalyze, setAnalysisResult, setIsLoading }: UrlInputFormProps) {
   const initialState: FormState | undefined = undefined;
-  const [state, formAction] = useFormState(onAnalyze, initialState);
+  const [state, formAction] = useActionState(onAnalyze, initialState);
   const { toast } = useToast();
   const { pending } = useFormStatus(); // Get pending state for the form overall
 
