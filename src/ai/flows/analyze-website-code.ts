@@ -39,8 +39,6 @@ const AnalyzeWebsiteCodeOutputSchema = z.object({
   detectedTechnologies: z.array(DetectedTechnologySchema).describe('A list of detected technologies with their details.'),
   securityConcerns: z.array(z.string()).describe('A list of potential security concerns identified from the code.'),
   analysisSummary: z.string().describe('A brief summary of the analysis, including any issues encountered (e.g., failed to fetch page).'),
-  // Add raw HTML for debugging or further client-side inspection if needed - not for AI by default
-  // rawHtmlLength: z.number().optional().describe('Length of the retrieved HTML content.'),
 });
 export type AnalyzeWebsiteCodeOutput = z.infer<typeof AnalyzeWebsiteCodeOutputSchema>;
 
@@ -54,12 +52,14 @@ export async function analyzeWebsiteCode(
     return result;
   } catch (error) {
     console.error('[AIFlowWrapper/analyzeWebsiteCode] Error calling flow:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error(`[AIFlowWrapper/analyzeWebsiteCode] Full error: ${errorMessage}`, error);
     // Log the full error for better debugging on the server
-    console.error('[AIFlowWrapper/analyzeWebsiteCode] Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
+    // console.error('[AIFlowWrapper/analyzeWebsiteCode] Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
     return {
       detectedTechnologies: [],
       securityConcerns: [],
-      analysisSummary: `Error during analysis: ${error instanceof Error ? error.message : 'Unknown error'}. The website content might be inaccessible, the analysis process failed, or an unexpected issue occurred. Please check server logs for details.`,
+      analysisSummary: `Error during analysis: ${errorMessage}. The website content might be inaccessible, the analysis process failed, or an unexpected issue occurred. Please check server logs for details.`,
     };
   }
 }
@@ -71,7 +71,6 @@ const retrievePageContentTool = ai.defineTool(
     inputSchema: z.object({
       url: z.string().url().describe('The URL of the website to retrieve content from.'),
     }),
-    // Output schema now aligns with PageContentResult from page-retriever
     outputSchema: z.object({
         html: z.string().nullable().describe('The HTML content of the page, or null if an error occurred.'),
         headers: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional().describe('Response headers from the server.'),
@@ -84,7 +83,7 @@ const retrievePageContentTool = ai.defineTool(
   async ({url}): Promise<PageContentResult> => {
     console.log(`[Tool/retrievePageContent] Attempting to fetch: ${url}`);
     try {
-      const result = await retrievePageContent(url); // page-retriever now returns PageContentResult
+      const result = await retrievePageContent(url); 
       if (result.error) {
         console.warn(`[Tool/retrievePageContent] Error fetching ${url}: ${result.error}`);
       } else {
@@ -101,7 +100,6 @@ const retrievePageContentTool = ai.defineTool(
 const AnalyzeWebsiteCodePromptInputSchema = z.object({
   url: z.string().url(),
   htmlContent: z.string().describe('The HTML content of the page.'),
-  // Include headers and cookies if available for the AI to consider
   headers: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional().describe('Response headers from the server.'),
   cookies: z.string().optional().describe('Cookies string.'),
   signatureBasedDetections: z.array(DetectedTechnologySchema).describe('Technologies already detected by initial signature scanning (potentially using headers, cookies, URL, and HTML). Use this to guide and augment your analysis, not just repeat it. Focus on finding *additional* technologies or confirming/refining these with more evidence, especially from obfuscated code or behavioral patterns not covered by simple signatures.')
@@ -117,7 +115,7 @@ Your primary goal is to analyze the provided HTML content, headers, cookies, and
 The user has provided the URL: {{{url}}}
 The HTML content, and potentially HTTP headers and cookies, are provided.
 A list of technologies already detected by a signature-based scanner (which itself uses HTML, headers, cookies, URL patterns, etc.) is provided in 'signatureBasedDetections'. Your role is to:
-1.  **Deeply Analyze Obfuscated/Minified Code**: Go beyond simple signatures. Examine inline scripts, minified bundles, and any obfuscated code for patterns, unique strings, or function structures that indicate specific libraries or frameworks NOT caught by the initial scan or to confirm initial scans with higher confidence from code behavior. This includes analyzing inline script content and looking for patterns in how DOM elements are manipulated.
+1.  **Deeply Analyze Obfuscated/Minified Code**: Go beyond simple signatures. Examine inline scripts, minified bundles, and any obfuscated code for patterns, unique strings, or function structures that indicate specific libraries or frameworks NOT caught by the initial scan or to confirm initial scans with higher confidence from code behavior. This includes analyzing inline script content and looking for patterns in how DOM elements are manipulated. Actively search for signs of code obfuscation (e.g., packed code, mangled variable names, large hex/base64 arrays) and attempt to infer the underlying technologies or their characteristics.
 2.  **Correlate Information**: Use HTML, headers, cookies, and signature-based detections together. For example, if a header suggests a certain server-side technology, look for corroborating evidence in the HTML. If a cookie suggests a framework, look for its JS patterns.
 3.  **Infer Technologies**: Look for:
     *   JavaScript frameworks and libraries (e.g., React, Angular, Vue, jQuery, Svelte, Next.js, Nuxt.js, Ember.js, Backbone.js, Preact, Lodash, Underscore) by analyzing global variables, specific API usage in scripts, or characteristic HTML attributes.
@@ -140,11 +138,15 @@ A list of technologies already detected by a signature-based scanner (which itse
     *   Hardcoded credentials, use of 'eval()', verbose error messages.
 
 **Deep Analysis Instructions for AI (Beyond Signatures):**
-*   **Examine Minified and Obfuscated Code:** Actively look for patterns, unique string literals, or function structures within inline <script> tags. For example, jQuery often uses '$' or 'jQuery' globals, React might leave '__REACT_DEVTOOLS_GLOBAL_HOOK__' or 'data-reactroot'.
-*   **Fingerprinting:** Identify technologies by unique CSS class prefixes, specific HTML comment patterns, meta tags (e.g., '<meta name="generator" content="WordPress 5.x">'), inline JSON-LD, or unique IDs/structures.
-*   **Script Tag Analysis:** Analyze 'src' attributes of <script> and <link> tags.
-*   **Aggressive technology Inference from Obfuscated Code**: Look for large base64 encoded strings, eval() calls, Function() constructors. Analyze variable names and string literals, even if obfuscated. Identify patterns in DOM manipulation.
-*   **Global Variables & Inline Scripts:** Infer technologies from global variables (e.g., window.jQuery, window.angular) or patterns in inline script content.
+*   **Examine Minified and Obfuscated Code:** Actively look for patterns, unique string literals, or function structures within inline <script> tags that are characteristic of specific libraries, even if the code is minified or lightly obfuscated. For example, jQuery often uses '$' or 'jQuery' globals, React might leave '__REACT_DEVTOOLS_GLOBAL_HOOK__' or specific DOM attribute patterns like 'data-reactroot'.
+*   **Fingerprinting:** Identify technologies by their "fingerprints" – unique CSS class name prefixes (e.g., 'wp-' for WordPress, 'v-' for Vue), specific HTML comment patterns, meta tags (e.g., '<meta name="generator" content="WordPress 5.x">'), inline JSON-LD, or unique IDs/structures.
+*   **Script Tag Analysis:** Analyze 'src' attributes of <script> and <link> tags. Even if you can't fetch the content, the URL structure can reveal CDNs (e.g., cdnjs, unpkg, jsdelivr) or specific services. Look for version numbers in these URLs.
+*   **Aggressive technology Inference from Obfuscated Code**: Even if code is heavily obfuscated, attempt to infer technologies by identifying characteristic patterns. For example:
+    *  Look for large base64 encoded strings which can indicate the presence of minified assets or inline images.
+    *  Detect eval() calls or Function() constructors, which are often used to dynamically generate code. Trace the inputs to these calls if possible.
+    *  Analyze variable names and string literals, even if they are obfuscated. Some obfuscation techniques leave recognizable fragments.
+    *  Identify patterns in how DOM elements are created and manipulated, which might be unique to certain frameworks.
+*   **Global Variables & Inline Scripts:** Infer technologies from global variables (e.g., window.jQuery, window.angular, window.dataLayer) or patterns in inline script content.
 *   **HTML Structure & Comments:** Look for characteristic HTML structures, 'data-*' attributes, or revealing comments.
 *   **JSON-LD and Microdata:** Analyze structured data.
 *   **Header and Cookie Analysis**: If headers and cookies are provided, analyze them for clues. E.g., 'Server' header for web server, 'Set-Cookie' for session management frameworks.
@@ -161,9 +163,15 @@ A list of technologies already detected by a signature-based scanner (which itse
 - "website": (Optional) Official website.
 - "icon": (Optional) Icon filename.
 
-Combine your AI-driven findings with 'signatureBasedDetections'. If your analysis confirms a signature-based detection with more detail, update that entry. Add new technologies.
+Combine your AI-driven findings with 'signatureBasedDetections'. If your analysis confirms a signature-based detection with more detail (e.g., a more specific version or higher confidence from code analysis), update that entry. Add new technologies not found by signatures.
 The 'analysisSummary' should be a concise overview of ALL findings, including difficulties.
 If HTML content is null/empty, state analysis cannot proceed.
+Critically evaluate the 'signatureBasedDetections'. If a signature detection seems low confidence or generic, try to find stronger evidence in the code or headers to confirm, refine, or even refute it.
+Your goal is a comprehensive and accurate list. Prioritize depth of analysis over breadth if necessary due to token limits.
+Focus especially on JavaScript frameworks/libraries and their versions.
+If the site is complex like Netflix, expect heavy obfuscation and dynamic loading. Look for clues related to build tools (Webpack, Parcel), module loaders, and large JavaScript bundles.
+Identify if a site is a Single Page Application (SPA) and what framework might be powering it.
+Provide as much detail as possible for your 'detectionMethod' for any new or refined technologies.
 `,
 });
 
@@ -196,7 +204,6 @@ const analyzeWebsiteCodeFlow = ai.defineFlow(
           htmlContent: pageContentResult.html,
           headers: pageContentResult.headers,
           cookies: pageContentResult.cookies,
-          // robotsTxtContent: undefined, // TODO: Optionally fetch /robots.txt in a separate tool or page-retriever
       };
       const signatureResults: SignatureDetectedTechInfo[] = detectWithSignatures(detectionEngineInput);
       signatureDetections = signatureResults.map(sr => ({
@@ -204,7 +211,7 @@ const analyzeWebsiteCodeFlow = ai.defineFlow(
         technology: sr.name,
         version: sr.version,
         confidence: sr.confidence,
-        isHarmful: undefined, // AI can assess this
+        isHarmful: undefined, 
         detectionMethod: sr.detectionMethod,
         category: sr.category,
         matchedValue: sr.matchedValue,
@@ -215,13 +222,12 @@ const analyzeWebsiteCodeFlow = ai.defineFlow(
       signatureDetections.forEach(tech => console.log(`  ${flowLogPrefix} - Signature: ${tech.technology} (v${tech.version || 'N/A'}, conf: ${tech.confidence}) via ${tech.detectionMethod}`));
     } catch (e: any) {
       console.error(`${flowLogPrefix} Error during signature-based detection:`, e.message, e.stack);
-      // Log the full error object for more details if available
       console.error(`${flowLogPrefix} Full signature error object:`, JSON.stringify(e, Object.getOwnPropertyNames(e)));
     }
 
     const promptInput: z.infer<typeof AnalyzeWebsiteCodePromptInputSchema> = {
         url: pageContentResult.finalUrl || input.url,
-        htmlContent: pageContentResult.html, // Consider truncating if too large after testing
+        htmlContent: pageContentResult.html, 
         headers: pageContentResult.headers,
         cookies: pageContentResult.cookies,
         signatureBasedDetections: signatureDetections,
@@ -229,9 +235,7 @@ const analyzeWebsiteCodeFlow = ai.defineFlow(
     
     console.log(`${flowLogPrefix} AI Prompt input being prepared. HTML length: ${promptInput.htmlContent.length}, Num Headers: ${Object.keys(promptInput.headers || {}).length}, Signature Detections: ${promptInput.signatureBasedDetections.length}`);
 
-    // Basic truncation if HTML content is excessively large, to prevent hitting model token limits.
-    // This is a stop-gap; more sophisticated chunking/summarization might be needed for very large pages.
-    const MAX_HTML_LENGTH_FOR_PROMPT = 500000; // 500k chars, adjust as needed
+    const MAX_HTML_LENGTH_FOR_PROMPT = 700000; // Increased limit
     if (promptInput.htmlContent.length > MAX_HTML_LENGTH_FOR_PROMPT) {
       console.warn(`${flowLogPrefix} HTML content is very large (${promptInput.htmlContent.length} chars), truncating to ${MAX_HTML_LENGTH_FOR_PROMPT} chars for AI prompt.`);
       promptInput.htmlContent = promptInput.htmlContent.substring(0, MAX_HTML_LENGTH_FOR_PROMPT);
@@ -244,10 +248,9 @@ const analyzeWebsiteCodeFlow = ai.defineFlow(
 
     if (aiError) {
       console.error(`${flowLogPrefix} AI Prompt returned an error:`, aiError);
-      // Log the full error object
       console.error(`${flowLogPrefix} Full AI error object:`, JSON.stringify(aiError, Object.getOwnPropertyNames(aiError)));
       return {
-        detectedTechnologies: signatureDetections, // Fallback to signature detections
+        detectedTechnologies: signatureDetections, 
         securityConcerns: [],
         analysisSummary: `AI analysis encountered an error: ${aiError.message || 'Unknown AI error'}. Displaying signature-based detections only. (Check server logs for more details)`,
       };
@@ -265,30 +268,35 @@ const analyzeWebsiteCodeFlow = ai.defineFlow(
     console.log(`${flowLogPrefix} AI Prompt output received. Technologies from AI: ${aiOutput.detectedTechnologies?.length}, Concerns: ${aiOutput.securityConcerns?.length}`);
     
     const finalDetectedTechnologies = new Map<string, DetectedTechnology>();
-    // Add signature detections first
+    
     signatureDetections.forEach(tech => {
-        finalDetectedTechnologies.set(tech.technology.toLowerCase(), tech);
+        finalDetectedTechnologies.set(tech.technology.toLowerCase() + (tech.version || ''), tech);
     });
 
-    // Merge AI detections
     if (aiOutput.detectedTechnologies) {
         aiOutput.detectedTechnologies.forEach(aiTech => {
-            const key = aiTech.technology.toLowerCase();
-            const existing = finalDetectedTechnologies.get(key);
-            if (existing) {
-                // Merge: prioritize AI for certain fields if AI provides them, combine methods
+            const key = aiTech.technology.toLowerCase() + (aiTech.version || '');
+            const existingSignature = signatureDetections.find(
+              sigTech => sigTech.technology.toLowerCase() === aiTech.technology.toLowerCase() && 
+                         (!sigTech.version || !aiTech.version || sigTech.version === aiTech.version) // Match if versions are same or one is undefined
+            );
+
+            if (existingSignature) {
+                 // AI is refining or confirming a signature detection
                 finalDetectedTechnologies.set(key, {
-                    ...existing, // Start with existing (signature)
-                    ...aiTech,   // Override with AI fields
-                    confidence: Math.max(existing.confidence, aiTech.confidence || 0),
-                    version: aiTech.version || existing.version, // Prefer AI's version if provided
+                    ...existingSignature, // Start with signature base
+                    ...aiTech,           // Overlay with AI's findings
+                    // AI's confidence, version, and isHarmful should take precedence if provided
+                    confidence: aiTech.confidence !== undefined ? aiTech.confidence : existingSignature.confidence,
+                    version: aiTech.version || existingSignature.version,
+                    isHarmful: aiTech.isHarmful !== undefined ? aiTech.isHarmful : existingSignature.isHarmful,
+                    // Prepend AI's detection method if it's specific, otherwise show it's AI-refined
                     detectionMethod: aiTech.detectionMethod.startsWith("AI:") 
-                                     ? aiTech.detectionMethod // If AI explicitly states its method, use it
-                                     : `${existing.detectionMethod} (refined by AI: ${aiTech.detectionMethod})`, // Combine methods
-                    isHarmful: aiTech.isHarmful !== undefined ? aiTech.isHarmful : existing.isHarmful,
+                                     ? `${aiTech.detectionMethod} (refined from: ${existingSignature.detectionMethod})`
+                                     : `AI Refined: ${aiTech.detectionMethod} (Original: ${existingSignature.detectionMethod})`,
                 });
             } else {
-                // New detection from AI
+                // New detection purely from AI
                 finalDetectedTechnologies.set(key, aiTech);
             }
         });
@@ -306,3 +314,4 @@ const analyzeWebsiteCodeFlow = ai.defineFlow(
     return combinedOutput;
   }
 );
+
