@@ -1,807 +1,1117 @@
+/**
+ * TechDetective Pro - Technology Signatures
+ * 
+ * This file contains the signature database for detecting web technologies.
+ * Enhanced with patterns for obfuscated/minified code detection.
+ */
 
-// src/lib/signatures.ts
+const signatures = {
+  // Analytics
+  analytics: [
+    {
+      name: "Google Analytics",
+      versions: {
+        "Universal Analytics": {
+          weight: 0.9,
+          patterns: [ // Universal Analytics patterns
+            { type: "script", pattern: /www\.google-analytics\.com\/analytics\.js/i, weight: 0.9 }, // Main UA script
+            { type: "script", pattern: /www\.googletagmanager\.com\/gtag\/js/i, weight: 0.8 }, // Gtag script (can be used by both UA and GA4)
+            { type: "cookie", pattern: /^_gid/, weight: 0.7 }, // Secondary GA cookie
+            { type: "cookie", pattern: /^_gat/, weight: 0.6 }, // Throttle cookie
+            { type: "jsGlobal", pattern: "ga", weight: 0.8 }, // Global function
+            { type: "jsGlobal", pattern: "gtag" },
+            { type: "jsGlobal", pattern: "dataLayer" },
+            // Obfuscated patterns
+            { type: "html", pattern: /function\s*\(\s*[a-z]\s*,\s*[a-z]\s*,\s*[a-z]\s*\)\s*\{\s*[a-z]\s*\.\s*[a-z]\s*=\s*[a-z]\s*\.\s*[a-z]*\|\|\s*\[\]/i, weight: 0.7 },
+            { type: "networkRequest", pattern: /collect\?v=1&_v=j\d+&/i }
+          ]
+        },
+        "GA4": {
+          weight: 0.95,
+          patterns: [ // GA4 patterns
+            { type: "script", pattern: /www\.googletagmanager\.com\/gtag\/js\?id=G-/i, weight: 0.95 }, // GA4 script
+            { type: "jsGlobal", pattern: "gtag" },
+            { type: "networkRequest", pattern: /\/g\/collect\?v=2/i }
+          ]
+        }
+      }
+    },
+    {
+      name: "Mixpanel",
+      weight: 0.9,
+      patterns: [
+        { type: "script", pattern: /cdn\.mxpnl\.com\/libs\/mixpanel/i },
+        { type: "script", pattern: /cdn\.mixpanel\.com\/mixpanel/i },
+        { type: "cookie", pattern: /^mp_/ },
+        { type: "jsGlobal", pattern: "mixpanel" },
+        // Obfuscated patterns
+        { type: "networkRequest", pattern: /api\/2\.0\/track/i },
+        { type: "html", pattern: /function\s*\(\s*[a-z]\s*\)\s*\{\s*return\s*[a-z]\s*\.\s*[a-z]+\s*\(\s*"mixpanel"\s*\)/i, weight: 0.7 }
+      ]
+    },
+    {
+      name: "Segment",
+      weight: 0.9,
+      patterns: [
+        { type: "script", pattern: /cdn\.segment\.com\/analytics\.js/i },
+        { type: "cookie", pattern: /^ajs_/ },
+        { type: "jsGlobal", pattern: "analytics" },
+        { type: "networkRequest", pattern: /api\.segment\.io\/v1/i },
+        // Obfuscated patterns
+        { type: "html", pattern: /window\.analytics\s*=\s*window\.analytics\s*\|\|\s*\[\]/i, weight: 0.8 }
+      ]
+    },
+    {
+      name: "Zipkin",
+      weight: 0.9,
+      patterns: [
+        { type: "script", pattern: /zipkin/i },
+        { type: "header", pattern: "x-b3-traceid" },
+        { type: "header", pattern: "x-b3-spanid" },
+        { type: "header", pattern: "x-b3-sampled" },
+        { type: "networkRequest", pattern: /api\/v2\/spans/i },
+        { type: "html", pattern: /zipkin/i }
+      ]
+    }
+  ],
 
-// Categories (inspired by Wappalyzer's cats.json, simplified)
-// We can expand this later with actual IDs and names from Wappalyzer if needed.
-const CATEGORIES: Record<string, string> = {
-  '1': 'CMS',
-  '2': 'Message Boards',
-  '3': 'Database Managers',
-  '4': 'Documentation Tools',
-  '5': 'Widgets',
-  '6': 'Web Frameworks',
-  // ... add more as needed
-  '10': 'Analytics', // Wappalyzer uses 10 for Analytics
-  '11': 'JavaScript Libraries',
-  '12': 'Photo Galleries',
-  '13': 'Wikis',
-  '14': 'Hosting Panels',
-  // '15': 'Analytics', // Duplicate from 10, using 10
-  '18': 'Operating Systems',
-  '19': 'Search Engines',
-  '22': 'Web Servers',
-  '23': 'Advertising', // For Ad Networks
-  '25': 'Cache Tools',
-  '26': 'Rich Text Editors',
-  '27': 'JavaScript Frameworks', // Differentiated from Libraries
-  '28': 'Maps',
-  '29': 'Advertising Networks', // Also 23, consolidating if possible
-  '30': 'Network Devices',
-  '31': 'Media Servers',
-  '32': 'Webmail',
-  '34': 'Payment Processors',
-  '36': 'CDN',
-  '40': 'Web Services', // Generic for things like Open Graph if not more specific
-  '42': 'Marketing Automation', // For OneTrust if it fits
-  '47': 'UI Frameworks', // Good for Emotion
-  '57': 'Programming Languages',
-  '59': 'Database',
-  '62': 'Security', // For HSTS
-  '65': 'Font Scripts',
-  '66': 'Reverse Proxies', // For Envoy
-  '68': 'Cookie Compliance', // For OneTrust
-  '69': 'Miscellaneous', // For OpenGraph or general fallbacks
-  '70': 'Distributed Tracing', // For Zipkin
+  // Utility Libraries
+  utility_libraries: [
+    {
+      name: "jQuery",
+      versions: {
+        versionProperty: "$.fn.jquery",
+        "jQuery 1.x": {
+          weight: 0.9,
+          patterns: [
+            // Detects jQuery 1.x versions using the $().jquery property
+            { type: "jsVersion", pattern: /^1\./, versionProperty: "$.fn.jquery", weight: 0.9 },
+            { type: "script", pattern: /code\.jquery\.com\/jquery-1\./i, weight: 0.8 }, // Fallback to script tag
+          ]
+        },
+        "jQuery 2.x": {
+          weight: 0.9,
+          patterns: [
+            // Detects jQuery 2.x versions using the $().jquery property
+            { type: "jsVersion", pattern: /^2\./, versionProperty: "$.fn.jquery", weight: 0.9 },
+            { type: "script", pattern: /code\.jquery\.com\/jquery-2\./i, weight: 0.8 }, // Fallback to script tag
+          ]
+        },
+        "jQuery 3.x": {
+          weight: 0.9,
+          patterns: [
+            // Detects jQuery 3.x versions using the $().jquery property
+            { type: "jsVersion", pattern: /^3\./, versionProperty: "$.fn.jquery", weight: 0.9 },
+            { type: "script", pattern: /code\.jquery\.com\/jquery-3\./i, weight: 0.8 }, // Fallback to script tag
+          ]
+        },
+        "jQuery Unspecified Version": { // For cases where version property isn't detected
+          weight: 0.8,
+          patterns: [
+          ]
+        },
+        patterns: [
+          { type: "jsGlobal", pattern: "jQuery", weight: 0.9 },
+          { type: "jsGlobal", pattern: "$", weight: 0.9 },
+          { type: "script", pattern: /jquery(\.min)?\.js/i, weight: 0.8 },
+          { type: "html", pattern: /<script[^>]+jquery/i },
+          { type: "html", pattern: /<script[^>]+jquery-migrate/i },
+        ]
+      },
+      versionProperty: "$.fn.jquery",
+    },
+    {
+      name: "Lodash",
+      weight: 0.9,
+      patterns: [
+        { type: "jsGlobal", pattern: "_" },
+        { type: "script", pattern: /lodash(\.min)?\.js/i }
+      ]
+    }
+  ],
+
+  // Payment Processors
+  payment_processors: [
+    {
+      name: "Stripe",
+      weight: 0.95,
+      patterns: [
+        { type: "script", pattern: /js\.stripe\.com/i, weight: 0.9 },
+        { type: "cookie", pattern: /__stripe_mid/, weight: 0.7 },
+        { type: "cookie", pattern: /__stripe_sid/, weight: 0.7 },
+        { type: "jsGlobal", pattern: "Stripe", weight: 0.9 },
+        // Obfuscated patterns
+        { type: "networkRequest", pattern: /api\.stripe\.com/i, weight: 0.8 },
+        { type: "html", pattern: /data-stripe/i, weight: 0.7 }
+      ]
+    },
+    {
+      name: "PayPal",
+      weight: 0.9,
+      patterns: [
+        { type: "script", pattern: /paypal\.com\/sdk/i },
+        { type: "script", pattern: /paypalobjects\.com/i },
+        { type: "jsGlobal", pattern: "paypal", weight: 0.9 },
+        // Obfuscated patterns
+        { type: "networkRequest", pattern: /\.paypal\.com/i, weight: 0.8 },
+        { type: "html", pattern: /data-paypal/i, weight: 0.6 },
+        { type: "cookie", pattern: /paypal/i, weight: 0.6 },
+        { type: "html", pattern: /paypalcheckout/i, weight: 0.6 }
+      ]
+    },
+    {
+      name: "BitPay",
+      weight: 0.9,
+      patterns: [
+        { type: "script", pattern: /bitpay\.com\/bitpay\.js/i },
+        { type: "script", pattern: /bitpay\.com\/bitpay\.min\.js/i },
+        { type: "html", pattern: /data-bitpay/i },
+        { type: "networkRequest", pattern: /bitpay\.com\/api/i },
+        { type: "jsGlobal", pattern: "bitpay" }
+      ]
+    }
+  ],
+
+  // Security
+  security: [
+    {
+      name: "HSTS",
+      weight: 0.9,
+      patterns: [
+        { type: "header", pattern: "strict-transport-security" }
+      ]
+    },
+    {
+      name: "Content Security Policy",
+      weight: 0.9,
+      patterns: [
+        { type: "header", pattern: "content-security-policy" },
+        { type: "meta", pattern: { name: "content-security-policy" } }
+      ]
+    }
+  ],
+  
+  // Miscellaneous
+  miscellaneous: [
+    {
+      name: "Open Graph",
+      weight: 0.9,
+      patterns: [
+        { type: "meta", pattern: { name: "og:title" } },
+        { type: "meta", pattern: { name: "og:type" } },
+        { type: "meta", pattern: { name: "og:image" } },
+        { type: "meta", pattern: { name: "og:url" } },
+        { type: "html", pattern: /property=["']og:/i }
+      ]
+    }
+  ],
+  
+  // Cookie Compliance
+  cookie_compliance: [
+    {
+      name: "OneTrust",
+      weight: 0.9,
+      patterns: [
+        { type: "script", pattern: /cdn\.cookielaw\.org/i },
+        { type: "script", pattern: /optanon/i },
+        { type: "cookie", pattern: /OptanonConsent/i },
+        { type: "cookie", pattern: /OptanonAlertBoxClosed/i },
+        { type: "jsGlobal", pattern: "OneTrust" },
+        { type: "jsGlobal", pattern: "Optanon" },
+        { type: "html", pattern: /onetrust/i }
+      ]
+    }
+  ],
+
+  self_hosted_cms: [
+    {
+      name: "WordPress",
+      versions: {
+        "Wordpress &lt; 4.0": {
+          patterns: [
+            { type: "meta", pattern: { name: "generator", content: /WordPress ([0-3]\.\d+(\.\d+)?)/i }, weight: 0.9 }
+          ]
+        },
+        "Wordpress &gt;= 4.0": {
+          weight: 0.9,
+          patterns: [
+            { type: "meta", pattern: { name: "generator", content: /WordPress ([4-9]\.\d+(\.\d+)?)/i }, weight: 0.9 }
+          ]
+        },
+        "Wordpress &gt;= 6.0": {
+          weight: 0.9,
+          patterns: [
+            { type: "meta", pattern: { name: "generator", content: /WordPress ([6-9]\.\d+(\.\d+)?)/i }, weight: 0.9 }
+          ]
+        }
+      },
+      patterns: [
+        { type: "script", pattern: /wp-content/, weight: 0.8 }, // Common script location
+        { type: "script", pattern: /wp-includes/, weight: 0.8 }, // Common script location
+        { type: "cookie", pattern: /wordpress_/, weight: 0.7 }, // Common WordPress cookie prefix
+        { type: "cookie", pattern: /wp-settings-\d/, weight: 0.7 }, // Common WordPress cookie prefix
+        { type: "cookie", pattern: /wp-settings-/, weight: 0.7 }, // Common WordPress cookie prefix
+        { type: "networkRequest", pattern: /wp-json/i }, // Obfuscated patterns
+        { type: "jsGlobal", pattern: "wp" }
+      ]
+    },
+    {
+      name: "Squarespace",
+      // category: "hosted_cms", // This was in user's prompt, but signatures are already categorized by top-level key
+      weight: 0.9,
+      patterns: [
+        { type: "script", pattern: /squarespace-assets\.com/i, weight: 0.8 },
+        { type: "html", pattern: /squarespace-cdn/i, weight: 0.8 },
+        { type: "html", pattern: /class="sqs-/i, weight: 0.7 },
+        { type: "networkRequest", pattern: /squarespace\.com/i, weight: 0.7 },
+        { type: "meta", pattern: { name: "generator", content: /Squarespace/i }, weight: 0.9 }
+      ]
+    },
+    {
+      name: "Wix",
+      weight: 0.9,
+      patterns: [
+        { type: "html", pattern: /wix\.com/i, weight: 0.9 },
+        { type: "html", pattern: /static\.parastorage\.com/i, weight: 0.8 },
+        { type: "script", pattern: /wixstatic\.com/i, weight: 0.8 },
+        { type: "script", pattern: /wix\.com/i, weight: 0.8 },
+        { type: "networkRequest", pattern: /wix\.com/i, weight: 0.7 },
+        { type: "cookie", pattern: /WIX_LOCALE/i },
+        { type: "cookie", pattern: /SESS/ }
+      ]
+    },
+    {
+      name: "Drupal",
+      weight: 0.9,
+      patterns: [
+        { type: "script", pattern: /drupal\.js/i },
+        { type: "html", pattern: /drupal-/i },
+        { type: "html", pattern: /data-drupal/i },
+        { type: "jsGlobal", pattern: /Drupal/i },
+        { type: "meta", pattern: { name: "generator", content: /Drupal/i } },
+        // Obfuscated patterns
+        { type: "cookie", pattern: /SESS/ }
+      ]
+    },
+    {
+      name: "Joomla",
+      // category: "self_hosted_cms", // Redundant
+      weight: 0.8,
+      patterns: [
+        { type: "html", pattern: /joomla/i, weight: 0.8 },
+        { type: "meta", pattern: { name: "generator", content: /Joomla!/i }, weight: 0.9 },
+        { type: "script", pattern: /joomla-core/i, weight: 0.7 },
+        { type: "networkRequest", pattern: /joomla/i, weight: 0.7 }
+      ]
+    }
+  ],
+  hosted_cms: [
+    {
+      name: "Ghost",
+      weight: 0.9,
+      patterns: [
+        { type: "header", pattern: "x-ghost-cache-status" },
+        { type: "meta", pattern: { name: "generator", content: /Ghost/i }, weight: 0.9 },
+        { type: "html", pattern: /ghost/i },
+        { type: "script", pattern: /ghost/i }
+      ]
+    }
+  ],
+  css_frameworks: [
+    {
+      name: "Bootstrap",
+      // category: "css_frameworks", // Redundant
+      versions: {
+        "Bootstrap 3.x": {
+          weight: 0.9,
+          patterns: [
+            // Detects Bootstrap 3.x versions using the script tag
+            { type: "script", pattern: /bootstrapcdn\.com\/bootstrap\/3\./i, weight: 0.9 },
+            // Detects Bootstrap 3.x versions using the css tag
+            { type: "css", pattern: /bootstrapcdn\.com\/bootstrap\/3\./i, weight: 0.9 }
+          ]
+        },
+        "Bootstrap 4.x": {
+          weight: 0.9,
+          patterns: [
+            // Detects Bootstrap 4.x versions using the script tag
+            { type: "script", pattern: /bootstrapcdn\.com\/bootstrap\/4\./i, weight: 0.9 },
+            // Detects Bootstrap 4.x versions using the css tag with version in URL
+            { type: "css", pattern: /bootstrap\/4\./i, weight: 0.9 },
+            { type: "css", pattern: /bootstrapcdn\.com\/bootstrap\/4\./i, weight: 0.9 }
+          ]
+        },
+        "Bootstrap 5.x": {
+          weight: 0.9,
+          patterns: [
+            // Detects Bootstrap 5.x versions using the script tag
+            { type: "script", pattern: /bootstrapcdn\.com\/bootstrap\/5\./i, weight: 0.9 },
+            // Detects Bootstrap 5.x versions using the css tag with version in URL
+            { type: "css", pattern: /bootstrap\/5\./i, weight: 0.9 },
+            { type: "css", pattern: /bootstrapcdn\.com\/bootstrap\/5\./i, weight: 0.9 }
+          ]
+        },
+        patterns: [
+          { type: "script", pattern: /bootstrap(\.min)?\.js/i, weight: 0.8 }, // Common Bootstrap script
+          { type: "css", pattern: /bootstrap(\.min)?\.css/i, weight: 0.8 }, // Common Bootstrap CSS
+          { type: "html", pattern: /class="[^"]*navbar/i, weight: 0.7 }, // Common navbar class
+          { type: "html", pattern: /class="[^"]*container/i, weight: 0.7 }, // Common container class
+          { type: "html", pattern: /class="[^"]*row/i },
+          { type: "html", pattern: /class="[^"]*col-/i },
+          { type: "html", pattern: /class="[^"]*btn/i }
+        ]
+      }
+    },
+    {
+      name: "Tailwind CSS",
+      // category: "css_frameworks", // Redundant
+      weight: 0.9,
+      patterns: [
+        { type: "css", pattern: /tailwind(\.min)?\.css/i },
+        { type: "html", pattern: /class="[^"]*text-\w+-\d+/i },
+        { type: "html", pattern: /class="[^"]*bg-\w+-\d+/i },
+        { type: "html", pattern: /class="[^"]*p-\d+/i },
+        { type: "html", pattern: /class="[^"]*m-\d+/i }
+      ]
+    }
+  ],
+  server_platforms: [
+    {
+      name: "Apache",
+      weight: 0.9,
+      patterns: [
+        { type: "header", pattern: "server", value: /apache/i, weight: 0.9 },
+        { type: "header", pattern: "x-powered-by", value: /apache/i, weight: 0.7 },
+        { type: "html", pattern: /Apache Web Server/, weight: 0.6 },
+        { type: "error", pattern: /Apache/, weight: 0.7 }
+      ]
+    },  
+    {
+      name: "Nginx",
+      weight: 0.9,
+      patterns: [
+        { type: "header", pattern: "server", value: /nginx/i }
+      ]
+    },
+    {
+      name: "Express.js",
+      weight: 0.8,
+      patterns: [
+        { type: "header", pattern: "x-powered-by", value: /express/i }
+      ]
+    }
+  ],
+  hosting_providers: [
+    {
+      name: "Cloudways",
+      weight: 0.8,
+      patterns: [
+        { type: "header", pattern: "server", value: /cloudways/i },
+        { type: "networkRequest", pattern: /cloudwaysapps\.com/i },
+        { type: "error", pattern: /cloudways/i }
+      ]
+    },
+    {
+      name: "Digital Ocean",
+      weight: 0.7,
+      patterns: [
+        { type: "header", pattern: "server", value: /digitalocean/i },
+        { type: "networkRequest", pattern: /digitalocean/i }
+      ]
+    }
+  ],
+  reverse_proxies: [
+    {
+      name: "AWS",
+      weight: 0.8,
+      patterns: [
+        { type: "header", pattern: "x-amz-id-2" },
+        { type: "header", pattern: "x-amz-cf-id" },
+        { type: "networkRequest", pattern: /amazonaws\.com/i }
+      ]
+    },
+    {
+      name: "Google Cloud",
+      weight: 0.8,
+      patterns: [
+        { type: "header", pattern: "server", value: /Google Frontend/i, weight: 0.9 },
+        { type: "networkRequest", pattern: /googleapis\.com/i }
+      ]
+    }, 
+    {
+      name: "Cloudflare",
+      weight: 0.95, // High confidence for Cloudflare
+      patterns: [
+        { type: "header", pattern: "cf-ray", weight: 0.9 }, // Cloudflare's unique header
+        { type: "header", pattern: "cf-cache-status", weight: 0.8 }, // Cloudflare's unique header
+        { type: "header", pattern: "server", value: /cloudflare/i, weight: 0.8 }, // Cloudflare often sets the server header
+        { type: "cookie", pattern: /__cfduid/, weight: 0.7 }, // Common Cloudflare cookie
+        { type: "cookie", pattern: /__cf_bm/, weight: 0.7 }, // Common Cloudflare cookie
+        { type: "networkRequest", pattern: /cloudflare\.com/i, weight: 0.7 }
+      ]
+    },
+    {
+      name: "Envoy",
+      // category: "reverse_proxies", // Redundant
+      weight: 0.9,
+      patterns: [
+        { type: "header", pattern: "server", value: /envoy/i },
+        { type: "header", pattern: "x-envoy-upstream-service-time" }
+      ]
+    }
+  ],
+  programming_languages: [
+    {
+      // Check for X-Powered-By header or PHPSESSID cookie
+      name: "PHP",
+      weight: 0.8,
+      patterns: [
+        { type: "header", pattern: "x-powered-by", value: /php/i },
+        { type: "cookie", pattern: /PHPSESSID/i }
+      ]
+    },
+    {
+      // Check for Phusion Passenger server header or Ruby session cookie
+      name: "Ruby",
+      weight: 0.8,
+      patterns: [
+        { type: "header", pattern: "server", value: /Phusion Passenger/i },
+        { type: "cookie", pattern: /_session_id/i }
+      ]
+    },
+    {
+      // Check for Python server header or Django/Flask cookies
+      name: "Python",
+      weight: 0.8,
+      patterns: [
+        { type: "header", pattern: "server", value: /Python/i },
+        { type: "cookie", pattern: /django_/i },
+        { type: "cookie", pattern: /flask/i }
+      ]
+    }
+  ],
+  databases: [
+    {
+      name: "MySQL",
+      weight: 0.7,
+      patterns: [
+        { type: "html", pattern: /mysql/i },
+        { type: "error", pattern: /MySQL/i }
+      ]
+    },
+    {
+      name: "PostgreSQL",
+      weight: 0.7,
+      patterns: [
+        { type: "html", pattern: /postgresql/i },
+        { type: "error", pattern: /PostgreSQL/i }
+      ]
+    },
+    {
+      name: "MongoDB",
+      weight: 0.7,
+      patterns: [
+        { type: "html", pattern: /mongodb/i },
+        { type: "jsGlobal", pattern: "MongoDB" }
+      ]
+    },
+    {
+      name: "Redis",
+      weight: 0.7,
+      patterns: [
+        { type: "html", pattern: /redis/i },
+        { type: "header", pattern: "x-redis-info" },
+        { type: "networkRequest", pattern: /redis/i },
+        { type: "error", pattern: /Redis/i },
+        { type: "jsGlobal", pattern: "Redis" }
+      ]      
+    }
+  ],
+  marketing_automation: [
+    {
+      name: "Mailchimp",
+      weight: 0.8,
+      patterns: [
+        { type: "script", pattern: /cdn-images\.mailchimp\.com/i },
+        { type: "html", pattern: /mailchimp/i },
+        { type: "networkRequest", pattern: /mailchimp/i },
+        { type: "jsGlobal", pattern: /mailchimp/i }
+      ]
+    },
+    {
+      name: "Adyen",
+      weight: 0.8,
+      patterns: [
+        { type: "script", pattern: /checkout\.adyen\.com/i },
+        { type: "html", pattern: /adyen\.com/i },
+        { type: "jsGlobal", pattern: /Adyen/i },
+        { type: "networkRequest", pattern: /adyen\.com/i }
+      ]
+    },
+    {
+      name: "ActiveCampaign",
+      weight: 0.8,
+      patterns: [
+        { type: "script", pattern: /activehosted\.com/i },
+        { type: "networkRequest", pattern: /activehosted\.com/i }
+      ]
+    }
+  ]
 };
 
-// Represents a detailed check within a DOM element
-export interface DomCheck {
-  exists?: string; // Empty string means just check existence, otherwise a pattern for the element itself
-  text?: string; // Regex for text content
-  attributes?: Record<string, string>; // attrName: regex value pattern
-  properties?: Record<string, string>; // propName: regex value pattern (harder with regex, for future expansion)
-}
+/**
+ * Extracts version numbers from potential global JavaScript variables.
+ * @param {string} html - The HTML content of the website.
+ * @param {string[]} jsGlobals - Array of potential global JavaScript variable names.
+ * @returns {object} - Object containing detected JavaScript versions by variable name (e.g., { 'React.version': '18.0.0', '$.fn.jquery': '3.6.0' }).
+ */
+const extractJsVersions = (html: string, jsGlobals: string[]): Record<string, string | null> => {
+  const jsVersions: Record<string, string | null> = {};
 
-
-export interface TechnologySignature {
-  // Wappalyzer core fields
-  name: string; // Name of the technology (used as key in Wappalyzer's JSON)
-  cats?: number[]; // Category IDs
-  description?: string;
-  website: string;
-  icon?: string; // e.g., "React.svg"
-  cpe?: string; // Common Platform Enumeration
-  saas?: boolean;
-  oss?: boolean;
-  pricing?: string[]; // e.g., ["low", "freemium"]
-
-  // Detection patterns
-  cookies?: Record<string, string>; // name: regex value pattern
-  // dom can be a string (selector), array of strings (selectors), or object (selector -> DomCheck)
-  dom?: string | string[] | Record<string, DomCheck | string>;
-  dns?: Record<string, string[]>; // e.g., { "MX": ["example\\.com"] } (for future use)
-  headers?: Record<string, string>; // headerName: regex value pattern
-  html?: string | string[]; // regex patterns for raw HTML
-  text?: string | string[]; // regex patterns for text content (HTML stripped)
-  js?: Record<string, string>; // JS variable/property paths: regex value pattern or empty for existence
-  meta?: Record<string, string>; // metaTagName: regex content pattern
-  scriptSrc?: string | string[]; // regex for <script src="..." URLs
-  scripts?: string | string[]; // regex for inline <script> content or external script content (if fetched)
-  url?: string | string[]; // regex for the page URL
-  robots?: string | string[]; // regex for robots.txt content (for future use)
-  probe?: Record<string, string>; // path: regex for content at path (for future use)
-  xhr?: string | string[]; // regex for XHR/fetch request URLs (for future use)
-  css?: string | string[]; // regex for CSS rules (applied to inline styles or fetched CSS)
-
-  // Relationships
-  implies?: string | string[]; // Tech names or "TechName\\;confidence:XX"
-  requires?: string | string[];
-  requiresCategory?: number[];
-  excludes?: string | string[];
-
-  // Fields used by our system, can be derived or explicit
-  id: string; // Unique ID for the signature (can be same as name or more specific)
-  confidence?: number; // Base confidence for this specific signature rule if not in pattern (0.0-1.0)
-  version?: string; // Static version if pattern doesn't extract it
-  // detectionMethod?: string; // Auto-generated based on type
-  category?: string; // Human-readable category from CATEGORIES
-}
-
-export interface DetectedTechnologyInfo {
-  id: string;
-  name: string;
-  version?: string;
-  confidence: number; // Overall confidence after considering pattern tags and base confidence
-  category: string;
-  detectionMethod: string;
-  matchedValue?: string;
-  website?: string;
-  icon?: string;
-}
-
-interface ParsedPattern {
-  regex: RegExp;
-  confidence?: number; // 0-100 from pattern tag
-  version?: string; // Version template like \1 or \1?value:other
-}
-
-// Helper to parse patterns like "jquery-([0-9.]+)\\.js\\;version:\\1\\;confidence:50"
-function parseTaggedPattern(patternStr: string): ParsedPattern {
-  const parts = patternStr.split('\\;');
-  const regexStr = parts[0];
-  let confidence: number | undefined;
-  let version: string | undefined;
-
-  for (let i = 1; i < parts.length; i++) {
-    const tag = parts[i];
-    if (tag.startsWith('confidence:')) {
-      confidence = parseInt(tag.substring('confidence:'.length), 10);
-    } else if (tag.startsWith('version:')) {
-      version = tag.substring('version:'.length);
-    }
+  // Check for angular.version
+  const angularVersionMatch = html.match(/angular\.version\s*=\s*\{\s*full:\s*['"]([^'"]+)['"]/i);
+  if (angularVersionMatch && angularVersionMatch[1]) {
+      jsVersions["angular.version"] = angularVersionMatch[1];
+  } else {
+      jsVersions["angular.version"] = null;
   }
-  // Wappalyzer treats regex as case-insensitive by default
-  return { regex: new RegExp(regexStr, 'i'), confidence, version };
+
+  // Check for Vue.version
+  const vueVersionMatch = html.match(/Vue\.version\s*=\s*['"]([^'"]+)['"]/i);
+  if (vueVersionMatch && vueVersionMatch[1]) {
+      jsVersions["Vue.version"] = vueVersionMatch[1];
+  } else {
+      jsVersions["Vue.version"] = null;
+  }
+
+  // Check for React.version
+  const reactVersionMatch = html.match(/React\.version\s*=\s*['"]([^'"]+)['"]/i);
+  if (reactVersionMatch && reactVersionMatch[1]) {
+    jsVersions["React.version"] = reactVersionMatch[1];
+  } else {
+      jsVersions["React.version"] = null; // Indicate that React might be present but version wasn't found this way
+  }
+
+  // Check for $.fn.jquery (jQuery version)
+  const jqueryVersionMatch = html.match(/\$\.fn\.jquery\s*=\s*['"]([^'"]+)['"]/i);
+  if (jqueryVersionMatch && jqueryVersionMatch[1]) {
+ jsVersions["$.fn.jquery"] = jqueryVersionMatch[1];
+  }else {
+      jsVersions["$.fn.jquery"] = null; // Indicate that jQuery was found but version wasn't
+ }
+ return jsVersions;
 }
 
-function applyVersionTemplate(match: RegExpExecArray, template?: string): string | undefined {
-    if (!template || !match) return undefined;
+/**
+ * Adds a new signature to the signatures database.
+ */
+function addSignature(signature: any) {
+  if (!signatures[signature.category]) {
+    signatures[signature.category] = [];
+  }
+  signatures[signature.category].push(signature);
+}
 
-    const ternaryMatch = template.match(/^\\(\d)\?(.*?)(?::(.*?))?$/);
-    if (ternaryMatch) {
-        const groupIndex = parseInt(ternaryMatch[1], 10);
-        const trueVal = ternaryMatch[2];
-        const falseVal = ternaryMatch[3];
-        if (match[groupIndex]) {
-            return trueVal.replace(/\\(\d)/g, (_m, gi) => match[parseInt(gi, 10)] || '');
-        } else if (falseVal !== undefined) {
-            return falseVal.replace(/\\(\d)/g, (_m, gi) => match[parseInt(gi, 10)] || '');
+/**
+ * Deletes a signature from the signatures database by name.
+ * @param {string} name - The name of the signature to delete.
+ */
+function deleteSignatureByName(name: string) {
+    for (const category in signatures) {
+        signatures[category] = signatures[category].filter(sig => sig.name !== name);
+    }
+}
+
+
+
+/**
+ * @param {string} url - The URL of the website to detect technologies from.
+ * Detect technologies used on a website
+ * @param {string} html - The HTML content of the website
+ * @param {object} httpHeaders - The HTTP headers from the response
+ * @returns {object} - Object containing detected technologies by category
+ */
+const detectTechnologies = (html: string, httpHeaders: Record<string, string | string[]> = {}): Record<string, Array<{name: string, version: string | null, confidence: number}>> => {
+  const detected: Record<string, Array<{name: string, version: string | null, confidence: number}>> = {};
+  
+  const metaHeaders = extractHeaders(html);
+  const headers = { ...metaHeaders, ...httpHeaders };
+  
+  const metaTags = extractMetaTags(html);
+  const cookies = extractCookies(html); // From document.cookie patterns
+  
+  // Add cookies from HTTP headers (Set-Cookie)
+  const headerCookies: Array<{name: string, value: string}> = [];
+  if (httpHeaders && httpHeaders['set-cookie']) {
+    const setCookieHeader = httpHeaders['set-cookie'];
+    const setCookieArray = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
+    for (const cookieStr of setCookieArray) {
+        const nameMatch = cookieStr.match(/^([^=;]+)=/);
+        if (nameMatch && nameMatch[1]) {
+            // Simplified, real parsing is more complex (attributes, etc.)
+            headerCookies.push({ name: nameMatch[1], value: cookieStr.substring(nameMatch[1].length + 1).split(';')[0] });
         }
-        return undefined;
-    }
-
-    return template.replace(/\\(\d)/g, (_m, groupIndexStr) => {
-        const groupIndex = parseInt(groupIndexStr, 10);
-        return match[groupIndex] || '';
-    }).trim() || undefined;
-}
-
-
-// --- Extraction Utilities ---
-
-function extractScriptSrcs(html: string): string[] {
-  const scriptRegex = /<script[^>]+src=["']([^"']+)["']/gi;
-  const srcs: string[] = [];
-  let match;
-  while ((match = scriptRegex.exec(html)) !== null) {
-    srcs.push(match[1]);
-  }
-  return srcs;
-}
-
-function extractLinkHrefs(html: string, rel?: string): string[] {
-  const relPattern = rel ? `\\srel=["'](?:[^"']*\s)?${rel}(?:\\s[^"']*)?["']` : "";
-  const linkRegex = new RegExp(`<link[^>]+href=["']([^"']+)["']${relPattern}[^>]*>`, 'gi');
-  const hrefs: string[] = [];
-  let match;
-  while ((match = linkRegex.exec(html)) !== null) {
-    hrefs.push(match[1]);
-  }
-  return hrefs;
-}
-
-function extractMetaTags(html: string): Record<string, string[]> {
-  const metaStore: Record<string, string[]> = {};
-  const metaRegex = /<meta[^>]+(?:name|property)=["']([^"':\s]+)["'][^>]*content=["']([^"']*)["']/gi;
-  let match;
-  while ((match = metaRegex.exec(html)) !== null) {
-    const key = match[1].toLowerCase();
-    const content = match[2];
-    if (!metaStore[key]) {
-      metaStore[key] = [];
-    }
-    metaStore[key].push(content);
-  }
-  return metaStore;
-}
-
-function extractInlineScriptContents(html: string): string[] {
-  const scriptContentRegex = /<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/gi;
-  const contents: string[] = [];
-  let match;
-  while((match = scriptContentRegex.exec(html)) !== null) {
-    if (match[1].trim()) {
-      contents.push(match[1]);
     }
   }
-  return contents;
-}
-
-function extractTextContent(html: string): string {
-  let text = html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
-  text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
-  text = text.replace(/<!--[\s\S]*?-->/gi, '');
-  text = text.replace(/<[^>]+>/g, ' ');
-  return text.replace(/\s+/g, ' ').trim();
-}
-
-function extractDocumentCookies(cookieString?: string): Record<string, string> {
-  const cookies: Record<string, string> = {};
-  if (!cookieString) return cookies;
-  cookieString.split(';').forEach(cookie => {
-    const parts = cookie.split('=');
-    const name = parts.shift()?.trim();
-    const value = parts.join('=');
-    if (name) {
-      cookies[name] = value;
-    }
-  });
-  return cookies;
-}
-
-function extractInlineStyles(html: string): string {
-    const styleRegex = /<style[^>]*>([\s\S]*?)<\/style>/gi;
-    let styles = "";
-    let match;
-    while((match = styleRegex.exec(html)) !== null) {
-        styles += match[1] + "\n";
-    }
-    return styles.trim();
-}
+  const allCookies = [...cookies, ...headerCookies];
 
 
-// --- Signatures Database (Examples) ---
-export const signaturesDb: TechnologySignature[] = [
-  {
-    id: 'React', name: 'React', cats: [27], website: 'https://reactjs.org/', icon: 'React.svg',
-    js: {
-      'React.version': '([\\d.]+)\\;version:\\1', // Wappalyzer style
-      '__REACT_DEVTOOLS_GLOBAL_HOOK__.renderers.size': '.+'
-    },
-    dom: { // Wappalyzer style
-        '[data-reactroot]': {exists: ""},
-        '[data-reactid]': {exists: ""}
-    },
-    implies: "ReactDOM",
-    description: "React is a JavaScript library for building user interfaces."
-  },
-  {
-    id: 'ReactDOM', name: 'ReactDOM', cats: [27], website: 'https://reactjs.org/', icon: 'React.svg',
-    scriptSrc: "react-dom(?:[-.]([\\d.]+))?(?:\\.min)?\\.js\\;version:\\1",
-    description: "ReactDOM is the entry point of the DOM-related rendering paths for React."
-  },
-  {
-    id: 'Next.js', name: 'Next.js', cats: [6, 27], website: 'https://nextjs.org/', icon: 'Next.js.svg',
-    headers: { 'X-Powered-By': '^Next\\.js(?: ([\\d.]+))?\\;version:\\1' },
-    dom: { '#__NEXT_DATA__': { exists: "" } }, // Wappalyzer style for <script id="__NEXT_DATA__">
-    js: { 'next.version': '(.+)\\;version:\\1' },
-    implies: 'React',
-    description: "Next.js is a React framework for production."
-  },
-  {
-    id: 'jQuery', name: 'jQuery', cats: [11], website: 'https://jquery.com/', icon: 'jQuery.svg',
-    scriptSrc: [
-        "jquery(?:-([\\d.]*[\\d]))?(?:\\.min|\\.slim|\\.slim\\.min)?\\.js\\;version:\\1",
-        "ajax.googleapis.com/ajax/libs/jquery/([\\d.]+)/jquery.min.js\\;version:\\1"
-    ],
-    js: { 'jQuery.fn.jquery': '([\\d.]+)\\;version:\\1' }, // Wappalyzer style
-    description: "jQuery is a fast, small, and feature-rich JavaScript library."
-  },
-  {
-    id: 'Google Analytics', name: 'Google Analytics', cats: [10], website: 'https://analytics.google.com/', icon: 'Google Analytics.svg',
-    scriptSrc: [
-      "googletagmanager\\.com/gtag/js\\?id=(UA-[\\d-]+(?:-\\d+)?|G-[A-Z0-9]+)", // Supports both UA and G
-      "google-analytics\\.com/(?:ga|urchin|analytics)\\.js"
-    ],
-    js: { // Wappalyzer often checks for existence or specific values
-      'ga': '', 'gaplugins': '', '_gaq': '', 'GoogleAnalyticsObject': '',
-      'dataLayer.push': '\\Wconfig\\W.*(UA-|G-)' // Checks if dataLayer.push configures GA
-    },
-    cookies: { '_ga': '', '_gid': '', '_gat': '' },
-    description: "Google Analytics is a web analytics service that tracks and reports website traffic."
-  },
-  {
-    id: 'WordPress', name: 'WordPress', cats: [1], website: 'https://wordpress.org/', icon: 'WordPress.svg',
-    meta: { 'generator': 'WordPress ([\\d.]+)\\;version:\\1' },
-    html: [
-        "<link rel=[\"']stylesheet[\"'] [^>]+wp-content",
-        "<link rel=[\"']stylesheet[\"'] [^>]+wp-includes"
-    ],
-    scriptSrc: ["/wp-includes/", "/wp-content/"],
-    dom: { // Example of more specific DOM checks
-        'body.wp-admin': { exists: ""}, // If on an admin page
-        '#wpadminbar': { exists: ""},
-        'link[href*="wp-content/themes"]': {exists: ""} // Check for theme CSS
-    },
-    implies: 'PHP',
-    description: "WordPress is a free and open-source content management system."
-  },
-  {
-    id: 'PHP', name: 'PHP', cats: [57], website: 'https://php.net', icon: 'PHP.svg',
-    headers: {
-      'X-Powered-By': 'PHP(?:/([\\d.]+))?\\;version:\\1',
-      'Set-Cookie': 'PHPSESSID' // Common PHP session cookie
-    },
-    url: '\\.php(?:$|\\?)',
-    description: "PHP is a popular general-purpose scripting language that is especially suited to web development."
-  },
-  {
-    id: 'Cloudflare', name: 'Cloudflare', cats: [36, 62], website: 'https://www.cloudflare.com/', icon: 'Cloudflare.svg',
-    headers: { 'Server': 'cloudflare', 'cf-ray': '.+', 'CF-RAY': '.+' }, // CF-RAY can be uppercase
-    cookies: { '__cf_bm': '.+', '__cfduid': '.+', 'cf_clearance': '.+' },
-    js: { 'Cloudflare': '' , 'window.Cloudflare': ''},
-    scriptSrc: "cdn-cgi/challenge-platform", // For bot protection pages
-    description: "Cloudflare is a CDN, DNS, DDoS protection, and security service."
-  },
-  {
-    id: 'Zipkin', name: 'Zipkin', cats: [70], website: 'https://zipkin.io/', icon: 'Zipkin.svg',
-    headers: {
-      'X-B3-TraceId': '.+',
-      'X-B3-SpanId': '.+'
-    },
-    description: "Zipkin is a distributed tracing system."
-  },
-  {
-    id: 'Emotion', name: 'Emotion', cats: [47], website: 'https://emotion.sh/', icon: 'Emotion.png',
-    html: '<style[^>]+data-emotion(?:-css)?=',
-    js: { 'caches.inserted': '' },
-    css: ["\\.css-[a-zA-Z0-9]+", "data-emotion"], // Look for generated class names or data-emotion in styles
-    description: "Emotion is a library designed for writing CSS styles with JavaScript."
-  },
-  {
-    id: 'HSTS', name: 'HSTS', cats: [62], website: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security', icon: 'HSTS.svg',
-    headers: { 'Strict-Transport-Security': '.+' },
-    description: "HTTP Strict Transport Security (HSTS) is a web security policy mechanism."
-  },
-  {
-    id: 'Open Graph', name: 'Open Graph', cats: [40, 69], website: 'https://ogp.me/', icon: 'OpenGraph.svg',
-    meta: {
-      'og:title': '.+',
-      'og:type': '.+',
-      'og:url': '.+',
-      'og:image': '.+'
-    },
-    html: '<html[^>]+prefix="og:',
-    description: "The Open Graph protocol enables any web page to become a rich object in a social graph."
-  },
-  {
-    id: 'BitPay', name: 'BitPay', cats: [34], website: 'https://bitpay.com/', icon: 'BitPay.svg',
-    scriptSrc: 'bitpay\\.com/bitpay\\.js',
-    dom: { 'iframe#bitpay': { exists: ""} },
-    js: { 'bitpay': '' },
-    description: "BitPay provides Bitcoin and crypto payment processing services."
-  },
-  {
-    id: 'Lodash', name: 'Lodash', cats: [11], website: 'https://lodash.com/', icon: 'Lodash.svg',
-    scriptSrc: 'lodash(?:\\.min)?\\.js.*(?:version=([\\d\\.]+))?\\;version:\\1',
-    js: { '_.VERSION': '([\\d\\.]+)\\;version:\\1' },
-    html: '<!-- Lodash ([\\d\\.]+) -->\\;version:\\1',
-    description: "Lodash is a modern JavaScript utility library delivering modularity, performance, & extras."
-  },
-  {
-    id: 'Envoy', name: 'Envoy', cats: [66, 22], website: 'https://www.envoyproxy.io/', icon: 'Envoy.svg',
-    headers: {
-      'server': '(?:envoy|Envoy)',
-      'x-envoy-upstream-service-time': '.+'
-    },
-    description: "Envoy is an open source edge and service proxy, designed for cloud-native applications."
-  },
-  {
-    id: 'OneTrust', name: 'OneTrust', cats: [68, 42], website: 'https://www.onetrust.com/', icon: 'OneTrust.svg',
-    scriptSrc: ['cdn\\.cookielaw\\.org', 'optanon\\.blob\\.core\\.windows\\.net', 'geolocation\\.onetrust\\.com'],
-    cookies: { 'OptanonConsent': '.+', 'OptanonAlertBoxClosed': '.+' },
-    dom: { '#onetrust-banner-sdk': { exists: ""}, '#onetrust-consent-sdk': { exists: ""}},
-    js: { 'Optanon': '' , 'OneTrust': ''},
-    description: "OneTrust is a privacy, security, and data governance software provider."
-  },
-  {
-    id: 'Netflix App', name: 'Netflix App', cats: [31], website: 'https://www.netflix.com', icon: 'Netflix.svg',
-    url: 'netflix\\.com',
-    js: {'netflix.reactContext':'', 'netflix.falcor':''},
-    dom: {'[data-uia="player"]': {exists: ""}, 'body.netflix-sans': {exists: ""}},
-    meta: {'twitter:app:name:iphone': 'Netflix'},
-    description: "Netflix is a streaming service for TV shows and movies."
-  }
-];
+  const scripts = extractScripts(html);
+  const cssLinks = extractCssLinks(html);
+  const potentialJsGlobals = extractPotentialJsGlobals(html);
+  const potentialNetworkRequests = extractPotentialNetworkRequests(html);
+  const htmlComments = extractHtmlComments(html);
+  const jsVersions = extractJsVersions(html, potentialJsGlobals);
 
-// --- Main Detection Function ---
-export interface DetectionInput {
-  url: string;
-  htmlContent: string;
-  headers?: Record<string, string | string[]>; // From server response
-  cookies?: string; // From document.cookie or Set-Cookie headers
-  robotsTxtContent?: string; // Content of /robots.txt (for future use)
-  // Potential future inputs: fetched CSS content, fetched JS content for deeper analysis
-}
-
-export function detectWithSignatures(input: DetectionInput): DetectedTechnologyInfo[] {
-  const detectedStore = new Map<string, DetectedTechnologyInfo>();
-  const { url, htmlContent, headers = {}, cookies: cookieString } = input;
-
-  if (!htmlContent && !Object.keys(headers).length && !cookieString) {
-    console.warn("[Signatures] No content (HTML, headers, cookies) provided for detection.");
-    return [];
-  }
-
-  const scriptSrcs = htmlContent ? extractScriptSrcs(htmlContent) : [];
-  const linkHrefsStylesheet = htmlContent ? extractLinkHrefs(htmlContent, "stylesheet") : [];
-  const metaTags = htmlContent ? extractMetaTags(htmlContent) : {};
-  const inlineScriptContents = htmlContent ? extractInlineScriptContents(htmlContent) : [];
-  const plainTextContent = htmlContent ? extractTextContent(htmlContent) : "";
-  const documentCookies = extractDocumentCookies(cookieString);
-  const inlineStyles = htmlContent ? extractInlineStyles(htmlContent) : "";
-
-
-  const processPattern = (
-    valueToTest: string | undefined,
-    patternStr: string,
-    baseSigConfidence: number,
-    sig: TechnologySignature,
-    detectionMethodType: string,
-    matchedDataSource: string
-  ): DetectedTechnologyInfo | null => {
-    if (valueToTest === undefined || valueToTest === null) return null;
-
-    const parsed = parseTaggedPattern(patternStr);
-    const match = parsed.regex.exec(valueToTest);
-
-    if (match) {
-      const versionFromPattern = applyVersionTemplate(match, parsed.version);
-      const confidenceFromTag = parsed.confidence !== undefined ? parsed.confidence / 100 : baseSigConfidence;
-
-      return {
-        id: sig.id,
-        name: sig.name,
-        version: versionFromPattern || sig.version,
-        confidence: Math.min(1.0, Math.max(0, confidenceFromTag)),
-        category: sig.cats?.map(c => CATEGORIES[c.toString()] || `CatID-${c}`).join(', ') || sig.category || 'Unknown',
-        detectionMethod: `${detectionMethodType}: ${sig.name} (on ${matchedDataSource})`,
-        matchedValue: match[0].length > 200 ? match[0].substring(0, 197) + '...' : match[0],
-        website: sig.website,
-        icon: sig.icon,
-      };
-    }
-    return null;
-  };
-
-  const addOrUpdateDetection = (techInfo: DetectedTechnologyInfo | null) => {
-    if (!techInfo) return;
-    const existing = detectedStore.get(techInfo.name);
-    if (!existing || techInfo.confidence > existing.confidence || (techInfo.confidence === existing.confidence && techInfo.version && !existing.version)) {
-      detectedStore.set(techInfo.name, techInfo);
-    } else if (existing && techInfo.confidence === existing.confidence && techInfo.version && existing.version && techInfo.version !== existing.version) {
-      // If confidences are same, but versions differ, take the longer version string or the new one if old one was generic
-       if (techInfo.version.length > existing.version.length || (existing.version.includes("*") && !techInfo.version.includes("*"))) {
-          detectedStore.set(techInfo.name, techInfo);
-       }
-    }
-  };
-
-  signaturesDb.forEach(sig => {
-    const baseSigConfidence = sig.confidence ?? 1.0;
-
-    // URL
-    if (sig.url && url) {
-      (Array.isArray(sig.url) ? sig.url : [sig.url]).forEach(p => {
-        addOrUpdateDetection(processPattern(url, p, baseSigConfidence, sig, 'URL', 'page URL'));
-      });
-    }
-
-    // Headers
-    if (sig.headers && headers) {
-      for (const headerName in sig.headers) {
-        const headerPattern = sig.headers[headerName];
-        const headerValueFromServer = headers[headerName.toLowerCase()] || headers[headerName];
-        if (headerValueFromServer) {
-          (Array.isArray(headerValueFromServer) ? headerValueFromServer : [headerValueFromServer]).forEach(val => {
-            addOrUpdateDetection(processPattern(val, headerPattern, baseSigConfidence, sig, 'Header', headerName));
-          });
-        }
-      }
-    }
-
-    // Cookies
-    if (sig.cookies) {
-      for (const cookieName in sig.cookies) {
-        const cookiePattern = sig.cookies[cookieName]; // This is the regex for the cookie *value*
-        if (documentCookies[cookieName]) { // Check if cookie with this name exists
-          if (cookiePattern === "") { // Wappalyzer: empty string means check for existence
-             addOrUpdateDetection({
-                id: sig.id, name: sig.name, version: sig.version, confidence: baseSigConfidence,
-                category: sig.cats?.map(c => CATEGORIES[c.toString()] || `CatID-${c}`).join(', ') || sig.category || 'Unknown',
-                detectionMethod: `Cookie Exists: ${sig.name} (on ${cookieName})`,
-                matchedValue: cookieName, website: sig.website, icon: sig.icon,
-             });
-          } else {
-             addOrUpdateDetection(processPattern(documentCookies[cookieName], cookiePattern, baseSigConfidence, sig, 'Cookie Value', cookieName));
-          }
-        }
-      }
-    }
+  for (const category in signatures) {
+    detected[category] = []; 
+    const categorySignatures = signatures[category];
     
-    if (htmlContent) {
-        // Meta Tags
-        if (sig.meta) {
-          for (const metaNameKey in sig.meta) {
-            const metaPattern = sig.meta[metaNameKey];
-            if (metaTags[metaNameKey.toLowerCase()]) {
-              metaTags[metaNameKey.toLowerCase()].forEach(content => {
-                addOrUpdateDetection(processPattern(content, metaPattern, baseSigConfidence, sig, 'Meta Tag', metaNameKey));
-              });
-            }
-          }
-        }
+    for (const signature of categorySignatures) {
+      let detectedVersion: string | null = null;
+      let maxConfidence = 0;
+      let isDetected = false; 
+      
+      if (signature.versions) {
+        for (const versionKey in signature.versions) {
+          if (versionKey === 'patterns' || versionKey === 'versionProperty') continue; // Skip special keys
+          const versionData = signature.versions[versionKey];
+          const versionPatterns = versionData.patterns;
+          let versionConfidence = versionData.weight || 0.5; // Default weight if not specified
+          let versionMatches = 0;
 
-        // scriptSrc
-        if (sig.scriptSrc) {
-          const sources = [...scriptSrcs, ...linkHrefsStylesheet];
-          (Array.isArray(sig.scriptSrc) ? sig.scriptSrc : [sig.scriptSrc]).forEach(p => {
-            sources.forEach(src => {
-              addOrUpdateDetection(processPattern(src, p, baseSigConfidence, sig, 'Script/Link Src', 'script/link tag'));
-            });
-          });
-        }
-
-        // scripts (inline script content)
-        if (sig.scripts) {
-          (Array.isArray(sig.scripts) ? sig.scripts : [sig.scripts]).forEach(p => {
-            inlineScriptContents.forEach(scriptContent => {
-              addOrUpdateDetection(processPattern(scriptContent, p, baseSigConfidence, sig, 'Inline Script', 'script content'));
-            });
-          });
-        }
-
-        // html (raw html content)
-        if (sig.html) {
-          (Array.isArray(sig.html) ? sig.html : [sig.html]).forEach(p => {
-            addOrUpdateDetection(processPattern(htmlContent, p, baseSigConfidence, sig, 'HTML Content', 'raw HTML'));
-          });
-        }
-        
-        // text (plain text content)
-        if (sig.text) {
-          (Array.isArray(sig.text) ? sig.text : [sig.text]).forEach(p => {
-            addOrUpdateDetection(processPattern(plainTextContent, p, baseSigConfidence, sig, 'Text Content', 'page text'));
-          });
-        }
-
-        // js (global vars / properties in inline scripts)
-        // This is a simplified check on inline scripts. True JS execution is needed for full accuracy.
-        if (sig.js) {
-          for (const jsPath in sig.js) {
-            const jsValuePatternStr = sig.js[jsPath]; // Regex for the value, or empty for existence check
-            // Escape special characters in jsPath for regex creation
-            const escapedPath = jsPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            // Regex to find `path = value` or `path: value` or just `path`
-            // It tries to capture the value after '=' or ':'
-            // Group 1: path, Group 2: (optional) value
-            const jsPresencePattern = new RegExp(`(?:[\\s\\{\\(,;]|^)${escapedPath}(?:\\s*[=:]\\s*(['"\`]?((?:.|\\n)*?)['"\`]?))?`, 'gim');
-            
-            inlineScriptContents.forEach(scriptContent => {
-              let match;
-              while((match = jsPresencePattern.exec(scriptContent)) !== null) {
-                const matchedJsValue = match[2] !== undefined ? match[2] : ""; // If no value captured, treat as empty string
-
-                if (jsValuePatternStr === "" && match[0]) { // Existence check passed
-                  addOrUpdateDetection({
-                    id: sig.id, name: sig.name, version: sig.version, confidence: baseSigConfidence,
-                    category: sig.cats?.map(c => CATEGORIES[c.toString()] || `CatID-${c}`).join(', ') || sig.category || 'Unknown',
-                    detectionMethod: `JS Var Exists: ${sig.name} (on ${jsPath})`,
-                    matchedValue: jsPath, website: sig.website, icon: sig.icon,
-                  });
-                } else if (jsValuePatternStr !== "") {
-                  const parsedValuePattern = parseTaggedPattern(jsValuePatternStr);
-                  const valueMatch = parsedValuePattern.regex.exec(matchedJsValue);
-                  if (valueMatch) {
-                    const versionFromJs = applyVersionTemplate(valueMatch, parsedValuePattern.version);
-                    const confidenceFromTag = parsedValuePattern.confidence !== undefined ? parsedValuePattern.confidence / 100 : baseSigConfidence;
-                    addOrUpdateDetection({
-                      id: sig.id, name: sig.name,
-                      version: versionFromJs || sig.version,
-                      confidence: Math.min(1.0, confidenceFromTag),
-                      category: sig.cats?.map(c => CATEGORIES[c.toString()] || `CatID-${c}`).join(', ') || sig.category || 'Unknown',
-                      detectionMethod: `JS Var/Prop Value: ${sig.name} (on ${jsPath})`,
-                      matchedValue: valueMatch[0].substring(0,100), website: sig.website, icon: sig.icon,
-                    });
-                  }
+          if (versionPatterns && versionPatterns.length > 0) {
+            for (const pattern of versionPatterns) {
+              let matchResult = checkPattern(pattern, html, scripts, cssLinks, headers, metaTags, allCookies, potentialJsGlobals, potentialNetworkRequests, htmlComments, jsVersions);
+              
+              if (matchResult.match) {
+                versionMatches++;
+                versionConfidence *= (pattern.weight !== undefined ? pattern.weight : 1); // Apply pattern weight
+                if (matchResult.version && !detectedVersion) { // Prioritize version from specific pattern if available
+                    detectedVersion = matchResult.version;
                 }
               }
-            });
+            }
+          }
+          
+          if (versionMatches > 0 && versionConfidence > maxConfidence) {
+            maxConfidence = versionConfidence;
+            if(!detectedVersion) detectedVersion = versionKey; // Use the version key as version if no specific pattern version found
+            isDetected = true;
           }
         }
-
-        // DOM checks (regex based approximations)
-        if (sig.dom) {
-            const domPatterns = typeof sig.dom === 'string' ? { [sig.dom]: { exists: "" } } :
-                                Array.isArray(sig.dom) ? sig.dom.reduce((acc, item) => { acc[item] = { exists: "" }; return acc; }, {} as Record<string, DomCheck>) :
-                                sig.dom;
-
-            for (const selector in domPatterns) {
-                const check = typeof domPatterns[selector] === 'string' ? {exists: domPatterns[selector] as string} : domPatterns[selector] as DomCheck;
-                
-                // Try to build a regex for the selector. This is very simplified.
-                // Handles basic ID (#id), class (.class), attribute ([attr=val], [attr]), and tag (tagname)
-                let elementRegexStr = "";
-                if (selector.startsWith('#')) { // ID
-                    elementRegexStr = `<[^>\\s]+\\s[^>]*id=["']${selector.substring(1)}["'][^>]*>`;
-                } else if (selector.startsWith('.')) { // Class
-                    elementRegexStr = `<[^>\\s]+\\s[^>]*class=["'](?:[^"']+\\s)?${selector.substring(1)}(?:\\s[^"']*)?["'][^>]*>`;
-                } else if (selector.startsWith('[')) { // Attribute
-                     const attrMatch = selector.match(/^\[([^=\]]+)(?:=(["']?)([^\]"']+)\2)?\]$/);
-                     if (attrMatch) {
-                        elementRegexStr = `<[^>\\s]+\\s[^>]*${attrMatch[1]}`;
-                        if (attrMatch[3]) { // attribute has value
-                            elementRegexStr += `=["']${attrMatch[3]}["']`;
-                        }
-                        elementRegexStr += `[^>]*>`;
-                     } else {
-                        elementRegexStr = `<[^>\\s]+\\s[^>]*${selector.substring(1, selector.length -1 )}[^>]*>`
-                     }
-                } else if (selector.match(/^[a-zA-Z0-9-]+$/)) { // Tag name
-                    elementRegexStr = `<${selector}(?:\\s[^>]*)?>`;
-                } else { // Default to treating selector as part of content if complex
-                    elementRegexStr = selector; 
-                }
-
-
-                const elementRegex = new RegExp(elementRegexStr, 'is'); // 's' for dotall, 'i' for case-insensitive
-                let elementMatch = elementRegex.exec(htmlContent);
-
-                if (elementMatch) { // Element potentially found
-                    const matchedElementHtml = elementMatch[0];
-                    
-                    if (check.exists !== undefined) { // "exists" check
-                         addOrUpdateDetection({
-                            id: sig.id, name: sig.name, version: sig.version, confidence: baseSigConfidence,
-                            category: sig.cats?.map(c => CATEGORIES[c.toString()] || `CatID-${c}`).join(', ') || sig.category || 'Unknown',
-                            detectionMethod: `DOM Exists: ${sig.name} (selector: ${selector})`,
-                            matchedValue: selector, website: sig.website, icon: sig.icon,
-                         });
-                    }
-
-                    if (check.text) {
-                        // Simplified text extraction from the matched element snippet
-                        const textContentMatch = matchedElementHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-                        addOrUpdateDetection(processPattern(textContentMatch, check.text, baseSigConfidence, sig, 'DOM Text', `${selector} text`));
-                    }
-
-                    if (check.attributes) {
-                        for (const attrName in check.attributes) {
-                            const attrPattern = check.attributes[attrName];
-                            // Regex to find attribute in the element snippet
-                            const attrValueRegex = new RegExp(`${attrName}=["']([^"']*)["']`, 'i');
-                            const attrMatchInElement = attrValueRegex.exec(matchedElementHtml);
-
-                            if (attrMatchInElement) { // Attribute name found
-                                if (attrPattern === "") { // Check for attribute existence
-                                     addOrUpdateDetection({
-                                        id: sig.id, name: sig.name, version: sig.version, confidence: baseSigConfidence,
-                                        category: sig.cats?.map(c => CATEGORIES[c.toString()] || `CatID-${c}`).join(', ') || sig.category || 'Unknown',
-                                        detectionMethod: `DOM Attr Exists: ${sig.name} (on ${selector} for attribute ${attrName})`,
-                                        matchedValue: attrName, website: sig.website, icon: sig.icon,
-                                     });
-                                } else { // Check for attribute value pattern
-                                   addOrUpdateDetection(processPattern(attrMatchInElement[1], attrPattern, baseSigConfidence, sig, 'DOM Attribute', `${selector} @${attrName}`));
-                                }
-                            }
-                        }
+        // Check general patterns if no version-specific one matched strongly or if there are base patterns
+        if (signature.versions.patterns) {
+            let baseConfidence = signature.weight || 0.5;
+            let baseMatches = 0;
+            for (const pattern of signature.versions.patterns) {
+                let matchResult = checkPattern(pattern, html, scripts, cssLinks, headers, metaTags, allCookies, potentialJsGlobals, potentialNetworkRequests, htmlComments, jsVersions);
+                if (matchResult.match) {
+                    baseMatches++;
+                    baseConfidence *= (pattern.weight !== undefined ? pattern.weight : 1);
+                    if (matchResult.version && !detectedVersion) {
+                        detectedVersion = matchResult.version;
                     }
                 }
             }
-        }
-        // CSS checks (on inline styles)
-        if (sig.css && inlineStyles) {
-            (Array.isArray(sig.css) ? sig.css : [sig.css]).forEach(p => {
-                addOrUpdateDetection(processPattern(inlineStyles, p, baseSigConfidence, sig, 'CSS Rule', 'inline styles'));
-            });
-        }
-    } // End if(htmlContent)
-  });
-
-
-  const finalDetectionsList = Array.from(detectedStore.values());
-  const finalDetectionMap = new Map<string, DetectedTechnologyInfo>(finalDetectionsList.map(d => [d.name, d]));
-
-  // --- Post-processing: implies, requires, excludes (Simplified loop) ---
-  let changedInPass;
-  do {
-    changedInPass = false;
-    const currentTechNames = Array.from(finalDetectionMap.keys());
-
-    for (const techName of currentTechNames) {
-      const detectedTech = finalDetectionMap.get(techName);
-      if (!detectedTech) continue; 
-      const sig = signaturesDb.find(s => s.name === techName);
-      if (!sig) continue;
-
-      // Implications
-      if (sig.implies) {
-        const impliedTechs = Array.isArray(sig.implies) ? sig.implies : [sig.implies];
-        impliedTechs.forEach(impliedStr => {
-          const parts = impliedStr.split('\\;');
-          const impliedName = parts[0];
-          let impliedConfidence = detectedTech.confidence * 0.9; // Default implication confidence factor
-
-          for (let i = 1; i < parts.length; i++) {
-            if (parts[i].startsWith('confidence:')) {
-              impliedConfidence = (parseInt(parts[i].substring('confidence:'.length), 10) / 100) * detectedTech.confidence;
-              break;
+            if (baseMatches > 0 && baseConfidence > maxConfidence) {
+                maxConfidence = baseConfidence;
+                 if (!detectedVersion && signature.versions.versionProperty && jsVersions[signature.versions.versionProperty]) {
+                    detectedVersion = jsVersions[signature.versions.versionProperty];
+                } else if (!detectedVersion) {
+                    detectedVersion = "Unknown"; // Fallback if still no version
+                }
+                isDetected = true;
             }
-          }
+        }
 
-          const impliedSig = signaturesDb.find(s => s.name === impliedName);
-          if (impliedSig) {
-            const existingImplied = finalDetectionMap.get(impliedName);
-            if (!existingImplied || existingImplied.confidence < impliedConfidence) {
-              finalDetectionMap.set(impliedName, {
-                id: impliedSig.id, name: impliedSig.name,
-                category: impliedSig.cats?.map(c => CATEGORIES[c.toString()] || `CatID-${c}`).join(', ') || impliedSig.category || 'Unknown',
-                confidence: Math.min(1.0, impliedConfidence),
-                detectionMethod: `Implied by: ${detectedTech.name}`,
-                website: impliedSig.website, icon: impliedSig.icon, version: impliedSig.version,
-                matchedValue: detectedTech.name
-              });
-              changedInPass = true;
-            }
-          }
-        });
+
+        if (isDetected) {
+          detected[category].push({ 
+            name: signature.name,
+            version: detectedVersion, 
+            confidence: Math.min(1, maxConfidence) // Ensure confidence does not exceed 1
+          });          
+        }
       }
-    } // End of currentTechNames loop for implies
-
-    // Re-iterate for requires/excludes after implications are settled in this pass
-    const currentTechNamesForReqEx = Array.from(finalDetectionMap.keys());
-    for (const techName of currentTechNamesForReqEx) {
-        const sig = signaturesDb.find(s => s.name === techName);
-        if (!sig) continue;
-
-        // Requires
-        if (sig.requires) {
-            const requiredTechs = Array.isArray(sig.requires) ? sig.requires : [sig.requires];
-            const allRequiredFound = requiredTechs.every(reqName => finalDetectionMap.has(reqName.split('\\;')[0]));
-            if (!allRequiredFound) {
-                if (finalDetectionMap.delete(techName)) changedInPass = true;
-                continue;
+      else if (signature.patterns) { // Handle technologies without explicit versions block but with patterns
+        let confidence = signature.weight || 0.5;
+        let matches = 0;
+        let patternVersion: string | null = null;
+        
+        for (const pattern of signature.patterns) {
+          let matchResult = checkPattern(pattern, html, scripts, cssLinks, headers, metaTags, allCookies, potentialJsGlobals, potentialNetworkRequests, htmlComments, jsVersions); 
+          
+          if (matchResult.match) {
+            matches++;
+            confidence *= (pattern.weight !== undefined ? pattern.weight : 1);
+            if (matchResult.version && !patternVersion) {
+                patternVersion = matchResult.version;
             }
+            if (confidence > 0.95) break; // Optimization: if high confidence, likely correct
+          }
         }
-        // Requires Category
-        if (sig.requiresCategory) {
-            const requiredCategories = Array.isArray(sig.requiresCategory) ? sig.requiresCategory : [sig.requiresCategory];
-            const foundReqCategory = Array.from(finalDetectionMap.values()).some(detected =>
-                requiredCategories.some(reqCatId => {
-                    const catName = CATEGORIES[reqCatId.toString()] || `CatID-${reqCatId}`;
-                    return detected.category.split(', ').includes(catName);
-                })
-            );
-            if (!foundReqCategory) {
-                 if (finalDetectionMap.delete(techName)) changedInPass = true;
-                 continue;
-            }
+        
+        if (matches > 0) {
+          // Attempt to get version from jsVersion if not found by patterns
+          if (!patternVersion && signature.versionProperty && jsVersions[signature.versionProperty]) {
+            patternVersion = jsVersions[signature.versionProperty];
+          }
+
+          detected[category].push({ 
+            name: signature.name,
+            version: patternVersion, 
+            confidence: Math.min(1, confidence)
+          });
         }
-        // Excludes
-        if (sig.excludes) {
-            const excludedTechs = Array.isArray(sig.excludes) ? sig.excludes : [sig.excludes];
-            const anExcludedFound = excludedTechs.some(exName => finalDetectionMap.has(exName.split('\\;')[0]));
-            if (anExcludedFound) {
-                if (finalDetectionMap.delete(techName)) changedInPass = true;
-            }
+      }
+    }
+  }
+  
+  return detected;
+}
+
+const checkVersionPattern = (patternRegex: RegExp, jsVersions: Record<string, string | null>, versionProperty: string): { version: string | null, match: boolean } => {
+  if (jsVersions && versionProperty && jsVersions[versionProperty] !== undefined && jsVersions[versionProperty] !== null) {
+    const versionStr = jsVersions[versionProperty];
+    if (versionStr === null) return { version: null, match: false }; // Explicitly check for null
+    const match = patternRegex.test(versionStr);
+    return { version: match ? versionStr : null, match };
+  }
+ return { version: null, match: false };
+}
+
+const checkPattern = (
+    patternObj: any, // Changed name from pattern to patternObj to avoid conflict
+    html: string, 
+    scripts: string[], 
+    cssLinks: string[], 
+    headers: Record<string, string | string[]>, 
+    metaTags: Record<string, string>, 
+    cookies: Array<{name: string, value: string}>, 
+    jsGlobals: string[], 
+    networkRequests: string[], 
+    htmlComments: string[], 
+    jsVersions: Record<string, string | null>
+): { match: boolean, version?: string | null, matchedValue?: string } => {
+  
+  let match = false;
+  let version: string | null = null;
+  let matchedValue: string | undefined;
+
+  const { type, pattern, value: patternValue, name: metaName, content: metaContentRegex, versionProperty, versionCaptureGroup } = patternObj;
+
+  const testAndExtractVersion = (textToTest: string, regexPattern: RegExp) => {
+    const execResult = regexPattern.exec(textToTest);
+    if (execResult) {
+        match = true;
+        matchedValue = execResult[0];
+        if (versionCaptureGroup && execResult[versionCaptureGroup]) {
+            version = execResult[versionCaptureGroup];
         }
     }
-  } while (changedInPass);
-
-  return Array.from(finalDetectionMap.values()).sort((a,b) => b.confidence - a.confidence);
-}
+  };
 
 
-export function addSignature(signature: TechnologySignature): void {
-  if (signaturesDb.find(s => s.id === signature.id)) {
-    console.warn(`[Signatures] Signature with ID ${signature.id} already exists. Not adding.`);
-    return;
+  switch (type) {
+    case "html":
+      testAndExtractVersion(html, pattern);
+      break;
+    case "script":
+      for (const script of scripts) {
+        testAndExtractVersion(script, pattern);
+        if (match) break;
+      }
+      break;
+    case "css":
+       for (const cssLink of cssLinks) {
+        testAndExtractVersion(cssLink, pattern);
+        if (match) break;
+      }
+      // Additionally, check inline styles if a more complex pattern indicates it
+      // For simplicity, this example only checks linked CSS files.
+      // To check inline CSS:
+      // const styleRegex = /<style[^>]*>([\s\S]*?)<\/style>/gi;
+      // let styleMatch;
+      // while ((styleMatch = styleRegex.exec(html)) !== null) {
+      //   testAndExtractVersion(styleMatch[1], pattern);
+      //   if (match) break;
+      // }
+      break;
+    case "header":
+      const headerKey = pattern.toLowerCase(); // Header names are case-insensitive
+      const headerVal = headers[headerKey];
+      if (headerVal !== undefined) {
+        const headerValStr = Array.isArray(headerVal) ? headerVal.join(', ') : headerVal;
+        if (patternValue) { // If a specific value regex is provided for the header
+            testAndExtractVersion(headerValStr, patternValue);
+        } else { // Just check for header existence
+            match = true;
+            matchedValue = headerKey;
+        }
+      }
+      break;
+    case "meta":
+      const metaTagKey = (metaName || pattern.name || pattern).toLowerCase(); // metaName from patternObj.name or patternObj.pattern.name
+      const metaTagValue = metaTags[metaTagKey];
+      if (metaTagValue !== undefined) {
+        if (metaContentRegex) { // If content regex is provided
+            testAndExtractVersion(metaTagValue, metaContentRegex);
+        } else { // Check for meta tag existence by name
+            match = true;
+            matchedValue = metaTagKey;
+        }
+      }
+      break;
+    case "cookie":
+      for (const cookie of cookies) {
+        // Test pattern against cookie name
+        if (pattern.test(cookie.name)) {
+            match = true;
+            matchedValue = cookie.name;
+            // If pattern also needs to match cookie value (not typical in simple Wappalyzer-like sigs)
+            // if (patternValue && patternValue.test(cookie.value)) { match = true; } else if (!patternValue) { match = true; }
+            break;
+        }
+        // Optionally, test pattern against cookie value if specified (e.g. pattern for value, name for cookie name)
+        // if (patternObj.name && cookie.name === patternObj.name && pattern.test(cookie.value)) {
+        //     match = true;
+        //     matchedValue = cookie.value;
+        //     break;
+        // }
+      }
+      break;
+    case "jsGlobal":
+      // Check if the global variable name (pattern) appears in the list of extracted globals or in HTML
+      if (jsGlobals.includes(pattern) || new RegExp(`\\b${pattern}\\b`, 'i').test(html)) {
+        match = true;
+        matchedValue = pattern;
+      }
+      break;
+    case "networkRequest":
+        for (const req of networkRequests) {
+            testAndExtractVersion(req, pattern);
+            if (match) break;
+        }
+        if (!match) { // Fallback to check HTML content if not found in explicit requests
+            testAndExtractVersion(html, pattern);
+        }
+      break;
+    case "jsVersion":
+      if (versionProperty && jsVersions[versionProperty]) {
+        const detectedVer = jsVersions[versionProperty];
+        if (detectedVer !== null) { // Ensure version is not null
+            if (pattern instanceof RegExp) { // The 'pattern' here is the version format regex
+                const versionMatchResult = pattern.exec(detectedVer);
+                if (versionMatchResult) {
+                    match = true;
+                    version = versionMatchResult[versionCaptureGroup || 0]; // Use capture group or whole match
+                    matchedValue = detectedVer;
+                }
+            } else if (typeof pattern === 'string') { // Simple string comparison for version
+                if (detectedVer.includes(pattern)) {
+                    match = true;
+                    version = detectedVer; // Or a more specific extraction if needed
+                    matchedValue = detectedVer;
+                }
+            }
+        }
+      }
+      break;
+    case "htmlComment":
+       for (const comment of htmlComments) {
+        testAndExtractVersion(comment, pattern);
+        if (match) break;
+      }
+      break;
+    case "error": // Basic error pattern check in HTML
+        testAndExtractVersion(html, pattern);
+        break;
+    default:
+      match = false;
   }
-  signaturesDb.push(signature);
-  console.log(`[Signatures] Added signature: ${signature.name} (ID: ${signature.id})`);
+  return { match, version, matchedValue };
 }
 
-export function deleteSignatureByName(name: string): void {
-  const initialLength = signaturesDb.length;
-  const newDb = signaturesDb.filter(sig => sig.name !== name);
-  if (newDb.length < initialLength) {
-    signaturesDb.length = 0;
-    signaturesDb.push(...newDb);
-    console.log(`[Signatures] Deleted signatures with name: ${name}`);
-  } else {
-    console.log(`[Signatures] No signatures found with name: ${name}`);
+const extractCookies = (html: string): Array<{name: string, value: string}> => {
+ const cookiesArr: Array<{name: string, value: string}> = [];
+ const cookieRegex = /document\.cookie\s*=\s*['"]([^'"]+?)=([^;'"]*)/gi;
+ let match;
+ while (match = cookieRegex.exec(html)) {
+ const name = match[1];
+ const value = match[2];
+ cookiesArr.push({ name: name, value: value });
   }
+  return cookiesArr;
 }
 
+const extractScripts = (html: string): string[] => {
+  const scriptsArr: string[] = [];
+  const scriptRegex = /<script[^>]*src=["']([^"']+)["'][^>]*>/gi;
+  let match;
+  
+  while (match = scriptRegex.exec(html)) {
+    scriptsArr.push(match[1]);
+  }
+  // Also consider inline script content for certain patterns if needed, though Wappalyzer focuses on src
+  return scriptsArr;
+}
 
-    
+const extractCssLinks = (html: string): string[] => {
+  const cssLinksArr: string[] = [];
+  const cssRegex = /<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["'][^>]*>/gi;
+  const altCssRegex = /<link[^>]*href=["']([^"']+\.css[^"']*)["'][^>]*rel=["']stylesheet["'][^>]*>/gi; // Added rel=stylesheet to be more specific
+  const altCssRegex2 = /<link[^>]*href=["']([^"']+\.css[^"']*)["'][^>]*>/gi; // More generic CSS link
+  let match;
+  
+  while (match = cssRegex.exec(html)) {
+    cssLinksArr.push(match[1]);
+  }
+  while (match = altCssRegex.exec(html)) {
+    if (!cssLinksArr.includes(match[1])) cssLinksArr.push(match[1]);
+  }
+   while (match = altCssRegex2.exec(html)) {
+    if (!cssLinksArr.includes(match[1])) cssLinksArr.push(match[1]);
+  }
+  
+  return cssLinksArr;
+}
+
+const extractMetaTags = (html: string): Record<string, string> => {
+  const metaTagsObj: Record<string, string> = {};
+  // Regex for &lt;meta name="..." content="..."&gt;
+  const metaNameRegex = /<meta[^>]*name=["']([^"']+)["'][^>]*content=["']([^"']*)["'][^>]*>/gi;
+  // Regex for &lt;meta property="..." content="..."&gt; (e.g., Open Graph)
+  const metaPropertyRegex = /<meta[^>]*property=["']([^"']+)["'][^>]*content=["']([^"']*)["'][^>]*>/gi;
+  // Regex for &lt;meta content="..." name="..."&gt; (alternative order)
+  const altMetaNameRegex = /<meta[^>]*content=["']([^"']*)["'][^>]*name=["']([^"']+)["'][^>]*>/gi;
+  let match;
+  
+  while (match = metaNameRegex.exec(html)) {
+    metaTagsObj[match[1].toLowerCase()] = match[2];
+  }
+  while (match = metaPropertyRegex.exec(html)) {
+    metaTagsObj[match[1].toLowerCase()] = match[2];
+  }
+  while (match = altMetaNameRegex.exec(html)) {
+    metaTagsObj[match[2].toLowerCase()] = match[1];
+  }
+  
+  return metaTagsObj;
+}
+
+const extractHeaders = (html: string): Record<string, string> => {
+  const headersObj: Record<string, string> = {};
+  // Primarily, headers are from HTTP response, not extractable from HTML directly in this manner.
+  // This function might be for meta http-equiv tags, which simulate headers.
+  const headerRegex = /<meta[^>]*http-equiv=["']([^"']+)["'][^>]*content=["']([^"']+)["'][^>]*>/gi;
+  const altHeaderRegex = /<meta[^>]*content=["']([^"']+)["'][^>]*http-equiv=["']([^"']+)["'][^>]*>/gi;
+  let match;
+  
+  while (match = headerRegex.exec(html)) {
+    headersObj[match[1].toLowerCase()] = match[2];
+  }
+  
+  while (match = altHeaderRegex.exec(html)) {
+    headersObj[match[2].toLowerCase()] = match[1];
+  }
+  
+  return headersObj;
+}
+
+const extractHtmlComments = (html: string): string[] => {
+    const comments: string[] = [];
+    const commentRegex = /&lt;!--([\s\S]*?)--&gt;/gi;
+    let match;
+
+    while ((match = commentRegex.exec(html)) !== null) {
+        comments.push(match[1].trim()); // Trim whitespace from comment content
+    }
+    return comments;
+}
+
+const extractPotentialJsGlobals = (html: string): string[] => {
+  const globals: Set<string> = new Set(); // Use Set to avoid duplicates
+  // Regex for var, let, const, window. assignments
+  const globalRegex = /(?:var|let|const)\s+([a-zA-Z_$][\w$]*)\s*=|window\.([a-zA-Z_$][\w$]*)\s*=/gi;
+  const inlineScriptRegex = /<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/gi; // Only inline scripts
+  let match;
+  let scriptMatch;
+  
+  while (scriptMatch = inlineScriptRegex.exec(html)) {
+    const scriptContent = scriptMatch[1];
+    while (match = globalRegex.exec(scriptContent)) {
+      if (match[1]) globals.add(match[1]); // From var/let/const
+      if (match[2]) globals.add(match[2]); // From window.
+    }
+  }
+  
+  // Add common globals that might be referenced without explicit declaration in analyzed snippet
+  const commonGlobals = ["React", "ReactDOM", "Vue", "jQuery", "$", "_", "angular", "Stripe", "paypal", "ga", "gtag", "dataLayer", "mixpanel", "analytics", "Optanon", "OneTrust", "bitpay", "wp", "Drupal", "MongoDB", "Redis"];
+  commonGlobals.forEach(global => {
+    // Check if global exists as a whole word to avoid partial matches in HTML context
+    // This is a heuristic; true global detection requires JS execution.
+    if (new RegExp(`\\b${global}\\b`).test(html)) { 
+      globals.add(global);
+    }
+  });
+  return Array.from(globals);
+}
+
+const extractPotentialNetworkRequests = (html: string): string[] => {
+  const requests: Set<string> = new Set(); // Use Set to avoid duplicates
+  // Regex to find full URLs (http/https) within strings (e.g. in script tags or data attributes)
+  const urlRegex = /(['"])(https?:\/\/[^"'\s]+)\1/gi; 
+  let match;
+  
+  while (match = urlRegex.exec(html)) {
+    try {
+      const url = new URL(match[2]);
+      // Add hostname and potentially significant parts of the path
+      let path = url.pathname;
+      // Simplify common tracking paths or generic paths
+      if (path === '/' || path.startsWith('/v1') || path.startsWith('/v2') || path.startsWith('/api')) {
+        // keep it simple
+      } else if (path.length > 50) {
+        path = path.substring(0, 50) + '...'; // Truncate long paths
+      }
+      requests.add(url.hostname + path);
+    } catch (e) {
+      // If URL parsing fails, try a simpler extraction for the domain-like part
+      const domainMatch = match[2].match(/https?:\/\/([^/?#]+)/);
+      if (domainMatch && domainMatch[1]) {
+        requests.add(domainMatch[1]);
+      }
+    }
+  }
+  
+  return Array.from(requests);
+}
+
+// Adding the new Google Analytics signature using the addSignature function
+addSignature({
+    name: "Google Analytics",
+    category: "analytics", // Ensure this category exists, or addSignature creates it
+    // weight: 0.8, // Not directly used by addSignature as per provided code
+    patterns: [
+        { type: "cookie", pattern: /^_ga/, weight: 0.8 }
+    ]
+});
+
+export {
+  signatures, // Export the main signatures database
+  extractJsVersions,
+  detectTechnologies,
+  addSignature,
+  deleteSignatureByName,
+  extractCookies,
+  checkVersionPattern,
+  checkPattern,
+  extractScripts,
+  extractCssLinks,
+  extractMetaTags,
+  extractHeaders,
+  extractHtmlComments,
+  extractPotentialJsGlobals,
+  extractPotentialNetworkRequests
+};
