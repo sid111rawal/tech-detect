@@ -1,4 +1,3 @@
-
 'use server';
 
 import { z } from 'zod';
@@ -13,6 +12,7 @@ export type FormState = {
   analysisResult?: WebsiteAnalysisResult;
   error?: boolean;
   fieldErrors?: Record<string, string[] | undefined>;
+  fetchMethod?: 'puppeteer' | 'fetch';
 };
 
 export async function handleAnalyzeWebsite(
@@ -48,6 +48,7 @@ export async function handleAnalyzeWebsite(
             message: result.analysisSummary || "Analysis failed with an error.",
             error: true,
             analysisResult: result,
+            fetchMethod: result.fetchMethod,
         };
     }
 
@@ -56,12 +57,14 @@ export async function handleAnalyzeWebsite(
        return {
         message: result.analysisSummary || "Analysis complete. No specific technologies detected with current methods.",
         analysisResult: result,
+        fetchMethod: result.fetchMethod,
        };
     }
     console.log('[ActionHandler] Analysis successful with detected items.');
     return {
       message: result.analysisSummary || "Analysis successful!",
       analysisResult: result,
+      fetchMethod: result.fetchMethod,
     };
   } catch (error) {
     console.error("[ActionHandler] Error during analysis:", error);
@@ -72,7 +75,12 @@ export async function handleAnalyzeWebsite(
     return {
       message: `Analysis error: ${errorMessage}`,
       error: true,
-      analysisResult: { detectedTechnologies: [], analysisSummary: `Analysis error: ${errorMessage}`, error: errorMessage }
+      analysisResult: { 
+        detectedTechnologies: [], 
+        analysisSummary: `Analysis error: ${errorMessage}`, 
+        error: errorMessage,
+        fetchMethod: undefined // Or a specific value if known at this point
+      }
     };
   }
 }

@@ -3,6 +3,7 @@
 import type { Browser, Page } from 'puppeteer-core';
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium-min';
+import { fetch as undiciFetch, Headers as UndiciHeaders, type Response as UndiciResponse } from 'undici';
 
 export interface PageContentResult {
   html: string | null;
@@ -12,6 +13,7 @@ export interface PageContentResult {
   finalUrl?: string; // URL after redirects
   error?: string;
   retrievedFromCache?: boolean;
+  fetchMethod?: 'puppeteer' | 'fetch'; // Indicate which method was used
 }
 
 // Simple in-memory cache with TTL
@@ -19,7 +21,7 @@ const cache = new Map<string, { data: PageContentResult | { content: string | nu
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 function generateCacheKey(type: 'pageContent' | 'robots', identifier: string): string {
-  return `${type}:v3:${identifier}`; // Incremented version to avoid old cache conflicts
+  return `${type}:v4:${identifier}`; // Incremented version
 }
 
 
@@ -27,8 +29,6 @@ async function launchBrowser(): Promise<Browser> {
   try {
     let resolvedExecutablePath: string | undefined;
 
-    // Try @sparticuz/chromium-min first.
-    // This is the recommended approach for serverless/constrained environments.
     try {
       console.log('[Service/PageRetriever] Attempting to get executablePath from @sparticuz/chromium-min...');
       resolvedExecutablePath = await chromium.executablePath();
@@ -41,12 +41,10 @@ async function launchBrowser(): Promise<Browser> {
       console.warn('[Service/PageRetriever] Error getting executablePath from @sparticuz/chromium-min:', e);
     }
 
-    // Fallback for local development if @sparticuz/chromium-min fails AND not in a strict production mode.
-    // Note: puppeteer.executablePath() with puppeteer-core usually returns undefined unless full puppeteer is somehow present.
     if (!resolvedExecutablePath && process.env.NODE_ENV !== 'production') {
       console.log('[Service/PageRetriever] Attempting fallback to puppeteer.executablePath() for local development...');
       try {
-        const puppeteerDefaultPath = puppeteer.executablePath(); // For puppeteer-core, this is often undefined.
+        const puppeteerDefaultPath = puppeteer.executablePath(); 
         if (puppeteerDefaultPath) {
           resolvedExecutablePath = puppeteerDefaultPath;
           console.log('[Service/PageRetriever] Using executablePath from puppeteer default (likely local full puppeteer):', resolvedExecutablePath);
@@ -74,8 +72,8 @@ async function launchBrowser(): Promise<Browser> {
     const browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
-      executablePath: resolvedExecutablePath, // Must be a valid string path
-      headless: chromium.headless, // Recommended to use chromium.headless
+      executablePath: resolvedExecutablePath, 
+      headless: chromium.headless,
       ignoreHTTPSErrors: true,
     });
     console.log('[Service/PageRetriever] Browser launched successfully.');
@@ -84,18 +82,107 @@ async function launchBrowser(): Promise<Browser> {
   } catch (error) {
     console.error('[Service/PageRetriever] Error in launchBrowser:', error);
     let errorMessage = (error instanceof Error) ? error.message : String(error);
-    // Make the error message more specific if it's the "path" argument error
     if (errorMessage.toLowerCase().includes("path argument must be of type string")) {
         errorMessage = "Chromium executable path was invalid or undefined. Ensure it's a valid string. Original error: " + errorMessage;
+    }
+    // This specific error message is for the user's reported issue.
+    if (errorMessage.includes("Chromium executable path could not be resolved")) {
+        throw new Error(`Failed to launch browser: ${errorMessage}`);
     }
     throw new Error(`Failed to launch browser: ${errorMessage}`);
   }
 }
 
 
+async function fetchWithUndici(url: string): Promise<PageContentResult> {
+  console.log(`[Service/PageRetriever] Attempting to fetch URL with undici: ${url}`);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+  try {
+    const response: UndiciResponse = await undiciFetch(url, {
+      // @ts-ignore undici fetch type for signal might expect AbortSignal from 'node:AbortController'
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 TechDetective/1.0',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      },
+      redirect: 'follow', // Handle redirects
+    });
+    clearTimeout(timeoutId);
+
+    const htmlContent = await response.text();
+    const status = response.status;
+    const finalUrl = response.url;
+
+    const responseHeaders: Record<string, string | string[]> = {};
+    response.headers.forEach((value, key) => {
+      // For headers that can appear multiple times (like Set-Cookie), store as array
+      const existing = responseHeaders[key.toLowerCase()];
+      if (existing) {
+        if (Array.isArray(existing)) {
+          existing.push(value);
+        } else {
+          responseHeaders[key.toLowerCase()] = [existing, value];
+        }
+      } else {
+        responseHeaders[key.toLowerCase()] = value;
+      }
+    });
+    
+    const setCookieStrings = response.headers.getSetCookie ? response.headers.getSetCookie() : [];
+
+    if (!response.ok) {
+      const errorText = `HTTP error ${status} ${response.statusText || ''}`;
+      console.warn(`[Service/PageRetriever] Failed to fetch URL ${url} (undici): ${errorText}`);
+      return {
+        html: htmlContent, // HTML might still be available on error pages
+        error: `Failed to fetch (undici): ${errorText}`,
+        status,
+        headers: responseHeaders,
+        setCookieStrings,
+        finalUrl,
+        fetchMethod: 'fetch',
+      };
+    }
+    
+    console.log(`[Service/PageRetriever] Successfully fetched content for URL (undici): ${finalUrl} (Status: ${status})`);
+    return {
+      html: htmlContent,
+      headers: responseHeaders,
+      setCookieStrings,
+      status,
+      finalUrl,
+      fetchMethod: 'fetch',
+    };
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    let detailedErrorMessage = error.message || 'An unknown error occurred during undici fetch.';
+    if (error.name === 'AbortError' || error.name === 'TimeoutError' || (error.cause && (error.cause as Error).name === 'TimeoutError')) {
+      detailedErrorMessage = `Request timed out for ${url} (undici).`;
+    } else if (error.cause && typeof error.cause === 'object' && (error.cause as any).code) {
+        detailedErrorMessage = `Network error (undici): ${(error.cause as any).code}. Please check server connectivity and DNS resolution.`;
+    } else if (error.code) {
+        detailedErrorMessage = `Network error (undici): ${error.code}. Please check server connectivity and DNS resolution.`;
+    }
+    
+    console.error(`[Service/PageRetriever] Error fetching URL ${url} with undici:`, detailedErrorMessage);
+    return {
+      html: null,
+      error: detailedErrorMessage,
+      finalUrl: url,
+      status: undefined,
+      fetchMethod: 'fetch',
+    };
+  }
+}
+
+
 /**
- * Retrieves the HTML content, headers, and cookies of a given URL using Puppeteer.
- * Uses an in-memory cache to avoid re-fetching recently accessed URLs.
+ * Retrieves the HTML content, headers, and cookies of a given URL.
+ * Tries Puppeteer first, then falls back to basic fetch if Puppeteer launch fails.
+ * Uses an in-memory cache.
  * @param url The URL to fetch.
  * @returns A promise that resolves to an object containing the page data or an error message.
  */
@@ -107,11 +194,12 @@ export async function retrievePageContent(url: string): Promise<PageContentResul
     console.log(`[Service/PageRetriever] Cache hit for URL: ${url}`);
     return { ...(cachedEntry.data as PageContentResult), retrievedFromCache: true };
   }
-  console.log(`[Service/PageRetriever] Cache miss or stale for URL: ${url}. Attempting to fetch with Puppeteer...`);
+  console.log(`[Service/PageRetriever] Cache miss or stale for URL: ${url}.`);
 
   let browser: Browser | null = null;
   try {
-    browser = await launchBrowser(); // launchBrowser now throws if it can't return a Browser
+    console.log(`[Service/PageRetriever] Attempting to fetch with Puppeteer for URL: ${url}...`);
+    browser = await launchBrowser(); 
 
     const page: Page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 TechDetective/1.0');
@@ -119,32 +207,27 @@ export async function retrievePageContent(url: string): Promise<PageContentResul
       'Accept-Language': 'en-US,en;q=0.9'
     });
 
-    console.log(`[Service/PageRetriever] Navigating to URL: ${url}`);
+    console.log(`[Service/PageRetriever] Navigating to URL (Puppeteer): ${url}`);
     const response = await page.goto(url, {
       waitUntil: 'networkidle0', 
       timeout: 30000, 
     });
 
     if (!response) {
-      // This case should ideally be rare if page.goto resolves, but good for robustness
-      throw new Error('Navigation failed, no response received from page.goto().');
+      throw new Error('Navigation failed, no response received from page.goto() (Puppeteer).');
     }
     
+    const responseHeadersRaw = response.headers(); 
     const responseHeaders: Record<string, string | string[]> = {};
-    const rawHeaders = response.headers(); 
-    for (const key in rawHeaders) {
-        responseHeaders[key.toLowerCase()] = rawHeaders[key];
+    for (const key in responseHeadersRaw) {
+        responseHeaders[key.toLowerCase()] = responseHeadersRaw[key];
     }
-
-    // Handle Set-Cookie headers correctly
-    // Puppeteer's response.headers() gives an object where header names are lowercase.
-    // 'set-cookie' can be an array of strings or a single string.
+    
     let setCookieHeaderValues: string[] = [];
     const setCookieRaw = response.headers()['set-cookie'];
     if (setCookieRaw) {
       setCookieHeaderValues = Array.isArray(setCookieRaw) ? setCookieRaw : [setCookieRaw];
     }
-
 
     const status = response.status();
     let htmlContent: string | null;
@@ -156,7 +239,7 @@ export async function retrievePageContent(url: string): Promise<PageContentResul
         htmlContent = await page.content(); 
       } catch (contentError) {
         htmlContent = null;
-        console.warn(`[Service/PageRetriever] Could not get page content on error for ${url}:`, contentError);
+        console.warn(`[Service/PageRetriever] Could not get page content on error for ${url} (Puppeteer):`, contentError);
       }
       const result: PageContentResult = {
         html: htmlContent,
@@ -165,6 +248,7 @@ export async function retrievePageContent(url: string): Promise<PageContentResul
         headers: responseHeaders,
         setCookieStrings: setCookieHeaderValues,
         finalUrl: page.url(),
+        fetchMethod: 'puppeteer',
         retrievedFromCache: false,
       };
       cache.set(cacheKey, { data: result, timestamp: Date.now() });
@@ -180,30 +264,49 @@ export async function retrievePageContent(url: string): Promise<PageContentResul
       setCookieStrings: setCookieHeaderValues,
       status: status,
       finalUrl: page.url(),
+      fetchMethod: 'puppeteer',
       retrievedFromCache: false,
     };
     cache.set(cacheKey, { data: successResult, timestamp: Date.now() });
     return successResult;
 
   } catch (error: any) {
-    console.error(`[Service/PageRetriever] Error fetching URL ${url} with Puppeteer:`, error);
     let detailedErrorMessage = error.message || 'An unknown error occurred during Puppeteer fetching.';
      if (error.name === 'TimeoutError') {
-      detailedErrorMessage = `Navigation timed out for ${url}. The page might be too slow, complex, or unreachable.`;
+      detailedErrorMessage = `Navigation timed out for ${url} (Puppeteer). The page might be too slow, complex, or unreachable.`;
+    }
+
+    // Check if it's a browser launch failure to initiate fallback
+    if (detailedErrorMessage.startsWith('Failed to launch browser:')) {
+      console.warn(`[Service/PageRetriever] Puppeteer launch failed for ${url}: ${detailedErrorMessage}. Falling back to undici fetch.`);
+      const fetchResult = await fetchWithUndici(url);
+      // If undici also fails, its error will be in fetchResult.error
+      // If successful, cache the fetchResult
+      if (!fetchResult.error || fetchResult.html) { // Cache if successfully fetched or got error page html
+          cache.set(cacheKey, { data: fetchResult, timestamp: Date.now() });
+      }
+      return fetchResult;
     }
     
+    console.error(`[Service/PageRetriever] Error fetching URL ${url} with Puppeteer (not a launch error):`, detailedErrorMessage);
     const errorResult: PageContentResult = {
       html: null,
-      error: detailedErrorMessage, // This will now include the more specific "Failed to launch browser" message if that was the cause
+      error: detailedErrorMessage,
       finalUrl: url, 
-      status: undefined, 
+      status: undefined,
+      fetchMethod: 'puppeteer', // Still indicates Puppeteer was attempted
       retrievedFromCache: false,
     };
+    // Don't cache generic puppeteer errors that aren't launch failures unless specifically needed.
     return errorResult;
   } finally {
     if (browser) {
       console.log('[Service/PageRetriever] Closing browser.');
-      await browser.close();
+      try {
+          await browser.close();
+      } catch (closeError) {
+          console.error('[Service/PageRetriever] Error closing browser:', closeError);
+      }
     }
   }
 }
@@ -237,8 +340,8 @@ export async function retrieveRobotsTxt(baseUrl: string): Promise<string | null>
   const timeoutId = setTimeout(() => controller.abort(), 10000); 
 
   try {
-    const response = await fetch(robotsUrl, {
-      // @ts-ignore Node.js fetch supports AbortSignal directly
+    const response = await undiciFetch(robotsUrl, {
+      // @ts-ignore
       signal: controller.signal, 
       headers: {
         'User-Agent': 'TechDetectiveBot/1.0 (+https://your-tool-website.com/bot-info)', 
@@ -272,9 +375,11 @@ export async function retrieveRobotsTxt(baseUrl: string): Promise<string | null>
       if (cause.code === 'UND_ERR_CONNECT_TIMEOUT'){
         detailedErrorMessage = `Connection timed out while fetching robots.txt for ${baseUrl}. Check server connectivity and DNS resolution.`;
       }
-      console.error(`[Service/PageRetriever] Fetch robots.txt error cause for URL ${robotsUrl}:`, JSON.stringify(error.cause, Object.getOwnPropertyNames(error.cause)));
+      // console.error(`[Service/PageRetriever] Fetch robots.txt error cause for URL ${robotsUrl}:`, JSON.stringify(error.cause, Object.getOwnPropertyNames(error.cause)));
     } else if (error.cause) { 
         detailedErrorMessage = `Network error (robots.txt). Cause: ${String(error.cause)}`;
+    } else if (error.code) {
+        detailedErrorMessage = `Network error (robots.txt): ${error.code}. Please check server connectivity and DNS resolution.`;
     }
     console.warn(`[Service/PageRetriever] Error fetching robots.txt for ${baseUrl}: ${detailedErrorMessage}`);
     return null;

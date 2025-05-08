@@ -3,7 +3,7 @@
 import type { WebsiteAnalysisResult } from '@/services/website-analysis';
 import { TechnologyItem } from './TechnologyItem';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Shield, ListChecks, Square } from 'lucide-react'; 
+import { Shield, ListChecks, Square, DatabaseZap, Shuffle } from 'lucide-react'; 
 
 interface AnalysisReportProps {
   report: WebsiteAnalysisResult;
@@ -27,7 +27,12 @@ export function AnalysisReport({ report }: AnalysisReportProps) {
             )}
             {report.retrievedFromCache && (
                 <span className="block text-xs text-accent mt-1 flex items-center">
-                    <Square className="h-3 w-3 mr-1" /> Results retrieved from cache.
+                    <DatabaseZap className="h-3 w-3 mr-1" /> Results retrieved from cache.
+                </span>
+            )}
+            {report.fetchMethod && (
+                 <span className="block text-xs text-muted-foreground mt-1 flex items-center">
+                    <Shuffle className="h-3 w-3 mr-1" /> Content fetched using: {report.fetchMethod}.
                 </span>
             )}
           </CardDescription>
