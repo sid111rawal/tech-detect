@@ -36,15 +36,6 @@ export default function Home() {
       <main className="flex-grow container mx-auto px-4 py-8 md:py-12 flex flex-col items-center">
         <div className="w-full max-w-4xl">
           <div className="text-center mb-10">
-            <Image 
-              src="https://picsum.photos/600/250" 
-              alt="Abstract representation of web technologies"
-              data-ai-hint="technology abstract"
-              width={600} 
-              height={250} 
-              className="rounded-lg mx-auto mb-6 shadow-xl border border-border"
-              priority
-            />
             <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-3">
               Detect What Powers the Web — Both Visible and Hidden
             </h2>
