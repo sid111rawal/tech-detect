@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -13,22 +12,11 @@ import Image from 'next/image';
 export default function Home() {
   const [analysisResult, setAnalysisResult] = useState<WebsiteAnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [displayWelcome, setDisplayWelcome] = useState(true);
 
   const handleSetAnalysisResult = (result: FormState['analysisResult'] | null) => {
     setAnalysisResult(result || null);
-    if (result || isLoading) {
-      setDisplayWelcome(false);
-    }
   };
   
-  useEffect(() => {
-    if (isLoading || analysisResult) {
-      setDisplayWelcome(false);
-    } else {
-      setDisplayWelcome(true);
-    }
-  }, [isLoading, analysisResult]);
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
@@ -68,10 +56,6 @@ export default function Home() {
             </div>
           )}
           
-          {displayWelcome && !isLoading && !analysisResult && (
-            <div className="mt-12 text-center p-8 bg-card rounded-xl shadow-lg border border-border/80">
-             </div>
-          )}
         </div>
       </main>
       <footer className="py-8 text-center text-muted-foreground text-sm border-t border-border/50 mt-auto">
@@ -80,3 +64,4 @@ export default function Home() {
     </div>
   );
 }
+
