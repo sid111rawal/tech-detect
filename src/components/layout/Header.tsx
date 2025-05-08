@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import siteLogo from '@/images/image.png'; // Import the logo
+import { siteConfig } from '@/config/site';
 
 export function Header() {
   return (
@@ -9,12 +10,12 @@ export function Header() {
         <Link href="/" className="flex items-center gap-2">
           <Image 
             src={siteLogo} 
-            alt="Tech Detective Logo" 
-            width={32} // Equivalent to h-8 (8 * 4px = 32px)
-            height={32} // Equivalent to w-8 (8 * 4px = 32px)
-            className="h-8 w-8 text-primary" // Keep classes for consistency if needed, though size is set by width/height
+            alt={`${siteConfig.name} Logo`}
+            width={32} 
+            height={32} 
+            className="h-8 w-8 text-primary" 
           />
-          <h1 className="text-2xl font-bold text-primary">Tech Detective</h1>
+          <h1 className="text-2xl font-bold text-primary">{siteConfig.name}</h1>
         </Link>
         {/* Future navigation items can go here */}
       </div>

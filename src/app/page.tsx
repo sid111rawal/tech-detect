@@ -10,6 +10,7 @@ import { handleAnalyzeWebsite, type FormState } from './actions';
 import type { WebsiteAnalysisResult } from '@/services/website-analysis';
 import Image from 'next/image';
 import siteImage from '@/images/image.png';
+import { siteConfig } from '@/config/site';
 
 export default function Home() {
   const [analysisResult, setAnalysisResult] = useState<WebsiteAnalysisResult | null>(null);
@@ -29,6 +30,15 @@ export default function Home() {
     }
   }, [isLoading]);
 
+  useEffect(() => {
+    // Show intro if there is no analysis result and not loading
+    if (!analysisResult && !isLoading) {
+      setShowIntro(true);
+    } else {
+      setShowIntro(false);
+    }
+  }, [analysisResult, isLoading]);
+
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
@@ -37,16 +47,16 @@ export default function Home() {
         <div className="w-full max-w-4xl">
           <div className="text-center mb-10">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-3">
-              Detect What Powers the Web — Both Visible and Hidden
+              {siteConfig.tagline}
             </h2>
             <p className="text-lg text-muted-foreground max-w-3xl mx-auto">
-              Tech Detective is a proof-of-concept tool designed to analyze websites and uncover the technologies they use—both surface-level and deeply embedded. This POC is actively evolving to identify frameworks, libraries, runtime fingerprints, and even hidden scripts or infrastructure clues.
+              {siteConfig.subTagline}
             </p>
           </div>
           
           <div className="text-center mb-6">
             <p className="text-lg font-semibold text-accent">
-              🎯 Prototype Preview: Not all tech leaves visible traces. Let’s find out what’s hiding behind the scenes.
+              {siteConfig.previewText}
             </p>
           </div>
 
@@ -57,7 +67,7 @@ export default function Home() {
           />
 
           {showIntro && (
-            <div className="mt-12 text-center p-8 bg-card rounded-xl shadow-lg border border-border/80">
+             <div className="mt-12 text-center p-8 bg-card rounded-xl shadow-lg border border-border/80">
               <Image
                 src={siteImage}
                 alt="Tech exploration graphic"
@@ -88,7 +98,7 @@ export default function Home() {
         </div>
       </main>
       <footer className="py-8 text-center text-muted-foreground text-sm border-t border-border/50 mt-auto">
-        <p>&copy; {new Date().getFullYear()} Tech Detective. All rights reserved.</p>
+        <p>&copy; {new Date().getFullYear()} {siteConfig.name}. All rights reserved.</p>
         <p className="mt-2">
           <span className="font-bold">Developed by <a href="https://sidrawal.netlify.app/" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">Sid</a> ❤️</span>
         </p>

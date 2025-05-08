@@ -3,6 +3,7 @@ import type {Metadata} from 'next';
 import {Geist, Geist_Mono} from 'next/font/google';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
+import { siteConfig } from '@/config/site';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -15,10 +16,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Tech Detective',
-  description: 'Analyze websites for hidden technologies and security concerns.',
+  title: siteConfig.name,
+  description: siteConfig.description,
   icons: {
-    icon: '/favicon.ico', // This will point to src/app/favicon.ico as Next.js serves it from the root
+    icon: '/favicon.ico', 
   },
 };
 

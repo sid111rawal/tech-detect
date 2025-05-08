@@ -11,6 +11,7 @@ import { AlertCircle, Search } from 'lucide-react';
 import type { handleAnalyzeWebsite, FormState } from '@/app/actions';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { siteConfig } from '@/config/site';
 
 
 interface UrlInputFormProps {
@@ -45,10 +46,10 @@ export function UrlInputForm({ onAnalyze, setAnalysisResult, setIsLoading }: Url
   const initialState: FormState | undefined = undefined;
   const [state, formAction] = useActionState(onAnalyze, initialState);
   const { toast } = useToast();
-  const { pending } = useFormStatus(); // Get pending state for the form overall
+  const { pending } = useFormStatus(); 
 
   useEffect(() => {
-    setIsLoading(pending); // Update loading state based on form submission status
+    setIsLoading(pending); 
   }, [pending, setIsLoading]);
 
 
@@ -63,7 +64,7 @@ export function UrlInputForm({ onAnalyze, setAnalysisResult, setIsLoading }: Url
         });
         setAnalysisResult(null);
       } else {
-        if (state.message !== "Validation failed.") { // Avoid toast for initial validation messages
+        if (state.message !== "Validation failed.") { 
              toast({
                 title: "Analysis Status",
                 description: state.message,
@@ -77,7 +78,7 @@ export function UrlInputForm({ onAnalyze, setAnalysisResult, setIsLoading }: Url
   return (
     <Card className="w-full max-w-2xl mx-auto shadow-xl">
       <CardHeader>
-        <CardTitle className="text-2xl">Analyze Website Stack (Beta)</CardTitle>
+        <CardTitle className="text-2xl">{siteConfig.formTitle}</CardTitle>
         <CardDescription>
           Enter a website URL to detect technologies, frameworks, and potential security concerns.
         </CardDescription>
