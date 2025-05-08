@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -45,11 +46,16 @@ export default function Home() {
               priority
             />
             <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-3">
-              Uncover Hidden Web Technologies
+              Detect What Powers the Web — Both Visible and Hidden
             </h2>
             <p className="text-lg text-muted-foreground max-w-3xl mx-auto">
-              Tech Detective uses advanced analysis to identify libraries, frameworks, and potential security risks on any website.
-              Gain deeper insights into what powers the web.
+              Tech Detective is a proof-of-concept tool designed to analyze websites and uncover the technologies they use—both surface-level and deeply embedded. This POC is actively evolving to identify frameworks, libraries, runtime fingerprints, and even hidden scripts or infrastructure clues.
+            </p>
+          </div>
+          
+          <div className="text-center mb-6">
+            <p className="text-lg font-semibold text-accent">
+              🎯 Prototype Preview: Not all tech leaves visible traces. Let’s find out what’s hiding behind the scenes.
             </p>
           </div>
 
@@ -72,19 +78,7 @@ export default function Home() {
           )}
           
           {displayWelcome && !isLoading && !analysisResult && (
-             <div className="mt-12 text-center p-8 bg-card rounded-xl shadow-lg border border-border/80">
-                <Image 
-                  src="https://picsum.photos/seed/startanalysishero/400/200" 
-                  alt="Illustration depicting data investigation and web technology icons"
-                  data-ai-hint="data investigation"
-                  width={400} 
-                  height={200} 
-                  className="rounded-lg mx-auto mb-6 opacity-90 shadow-md"
-                />
-               <h3 className="text-2xl font-semibold text-foreground mb-2">Ready to Investigate?</h3>
-               <p className="text-muted-foreground text-md max-w-md mx-auto">
-                 Enter a website URL above to begin your deep dive into its technology stack and security posture.
-               </p>
+            <div className="mt-12 text-center p-8 bg-card rounded-xl shadow-lg border border-border/80">
              </div>
           )}
         </div>

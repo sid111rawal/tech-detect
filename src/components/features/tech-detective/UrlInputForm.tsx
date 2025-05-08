@@ -77,7 +77,7 @@ export function UrlInputForm({ onAnalyze, setAnalysisResult, setIsLoading }: Url
   return (
     <Card className="w-full max-w-2xl mx-auto shadow-xl">
       <CardHeader>
-        <CardTitle className="text-2xl">Website Technology Analyzer</CardTitle>
+        <CardTitle className="text-2xl">Analyze Website Stack (Beta)</CardTitle>
         <CardDescription>
           Enter a website URL to detect technologies, frameworks, and potential security concerns.
         </CardDescription>
