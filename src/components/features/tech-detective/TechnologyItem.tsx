@@ -13,6 +13,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import Image from 'next/image';
+import { siteConfig } from "@/config/site";
 
 interface TechnologyItemProps {
   technology: DetectedTechnology;
@@ -65,11 +66,15 @@ export function TechnologyItem({ technology }: TechnologyItemProps) {
         )}
       </CardHeader>
       <CardContent className="space-y-3 text-sm flex-grow">
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">Confidence:</span>
-          <span className="font-semibold">{confidencePercentage}%</span>
-        </div>
-        <Progress value={confidencePercentage} aria-label={`Confidence ${confidencePercentage}%`} className="h-2 [&>div]:bg-accent" />
+        {siteConfig.showConfidence && (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Confidence:</span>
+              <span className="font-semibold">{confidencePercentage}%</span>
+            </div>
+            <Progress value={confidencePercentage} aria-label={`Confidence ${confidencePercentage}%`} className="h-2 [&>div]:bg-accent" />
+          </>
+        )}
         
         {technology.isHarmful && (
           <Badge variant="destructive" className="text-xs w-full justify-center py-1">Potentially Harmful</Badge>

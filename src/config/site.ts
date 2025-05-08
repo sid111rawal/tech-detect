@@ -8,4 +8,5 @@ export const siteConfig = {
   subTagline: "Tech Detector is a proof-of-concept tool designed to analyze websites and uncover the technologies they use—both surface-level and deeply embedded. This POC is actively evolving to identify frameworks, libraries, runtime fingerprints, and even hidden scripts or infrastructure clues.",
   previewText: "🎯 Prototype Preview: Not all tech leaves visible traces. Let’s find out what’s hiding behind the scenes.",
   formTitle: "Analyze Website Stack (Beta)",
+  showConfidence: false, // Added flag to control confidence display
 };
