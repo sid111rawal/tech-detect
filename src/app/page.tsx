@@ -8,38 +8,16 @@ import { AnalysisReport } from '@/components/features/tech-detective/AnalysisRep
 import { LoadingState } from '@/components/features/tech-detective/LoadingState';
 import { handleAnalyzeWebsite, type FormState } from './actions';
 import type { WebsiteAnalysisResult } from '@/services/website-analysis';
-import Image from 'next/image';
-import siteImage from '@/images/image.png';
 import { siteConfig } from '@/config/site';
 
 export default function Home() {
   const [analysisResult, setAnalysisResult] = useState<WebsiteAnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [showIntro, setShowIntro] = useState(true);
 
   const handleSetAnalysisResult = (result: FormState['analysisResult'] | null) => {
     setAnalysisResult(result || null);
-    if (result || isLoading) {
-      setShowIntro(false);
-    }
   };
   
-  useEffect(() => {
-    if (isLoading) {
-      setShowIntro(false);
-    }
-  }, [isLoading]);
-
-  useEffect(() => {
-    // Show intro if there is no analysis result and not loading
-    if (!analysisResult && !isLoading) {
-      setShowIntro(true);
-    } else {
-      setShowIntro(false);
-    }
-  }, [analysisResult, isLoading]);
-
-
   return (
     <div className="flex flex-col min-h-screen bg-background">
       <Header />
@@ -66,23 +44,6 @@ export default function Home() {
             setIsLoading={setIsLoading}
           />
 
-          {showIntro && (
-             <div className="mt-12 text-center p-8 bg-card rounded-xl shadow-lg border border-border/80">
-              <Image
-                src={siteImage}
-                alt="Tech exploration graphic"
-                width={128}
-                height={128}
-                className="mx-auto mb-6 h-32 w-32 object-contain"
-                data-ai-hint="technology abstract"
-              />
-              <h3 className="text-xl font-semibold text-foreground mb-2">Ready to Investigate?</h3>
-              <p className="text-muted-foreground">
-                Enter a URL above to begin your web technology analysis.
-              </p>
-            </div>
-          )}
-
           {isLoading && (
             <div className="mt-10 w-full">
               <LoadingState />
@@ -106,3 +67,4 @@ export default function Home() {
     </div>
   );
 }
+
