@@ -7,29 +7,11 @@
 import type { PageContentResult } from '@/services/page-retriever'; // Ensure this matches the updated interface
 import { retrieveRobotsTxt } from '@/services/page-retriever';
 
-// Import signatures from modularized files
-import { analyticsSignatures } from './signature-categories/analytics';
-import { utilityLibrariesSignatures } from './signature-categories/utility_libraries';
-import { paymentProcessorsSignatures } from './signature-categories/payment_processors';
-import { securitySignatures } from './signature-categories/security';
-import { miscellaneousSignatures } from './signature-categories/miscellaneous';
-import { cookieComplianceSignatures } from './signature-categories/cookie_compliance';
-import { selfHostedCmsSignatures } from './signature-categories/self_hosted_cms';
-import { hostedCmsSignatures } from './signature-categories/hosted_cms';
-import { cssFrameworksSignatures } from './signature-categories/css_frameworks';
-import { serverPlatformsSignatures } from './signature-categories/server_platforms';
-import { hostingProvidersSignatures } from './signature-categories/hosting_providers';
-import { reverseProxiesSignatures } from './signature-categories/reverse_proxies';
-import { programmingLanguagesSignatures } from './signature-categories/programming_languages';
-import { databasesSignatures } from './signature-categories/databases';
-import { marketingAutomationSignatures } from './signature-categories/marketing_automation';
-
-
 // Define the structure for a single pattern within a signature
 export interface Pattern {
   type: 'html' | 'script' | 'css' | 'header' | 'meta' | 'cookie' | 'jsGlobal' | 'networkRequest' | 'jsVersion' | 'htmlComment' | 'filePath' | 'robots' | 'error' | 'dom';
   pattern: RegExp | string | Record<string, any>; // RegExp for most, string for names, object for DOM
-  value?: RegExp | string;          // For header value, meta content, cookie value, DOM attribute/text value
+  value?: RegExp | string | Record<string, any>; // For header value, meta content, cookie value, DOM attribute/text value
   weight?: number;         // Confidence multiplier (0.0 to 1.0), defaults to 1
   versionProperty?: string; // For jsVersion type (e.g., "$.fn.jquery")
   versionCaptureGroup?: number; // For version extraction from pattern or value regex, 1-based
@@ -142,11 +124,9 @@ function normalizeWappalyzerPatterns(sigDef: SignatureDefinition): Pattern[] {
                 version = tag.substring('version:'.length);
             }
         }
-        // Attempt to convert to RegExp if not already (and not for specific types like js object keys)
-        // This needs to be smarter based on the type
-        if (typeof mainPattern === 'string' && !mainPattern.startsWith('/') && !mainPattern.endsWith('/')) {
-             try { mainPattern = new RegExp(mainPattern, 'i'); } catch (e) { /* keep as string if invalid regex */ }
-        }
+        
+        // Do not automatically convert to RegExp here. Precompile step will handle it.
+        // The mainPattern should remain a string if it's a regex string, or a literal string.
         return { mainPattern, confidence, version };
     };
 
@@ -158,18 +138,18 @@ function normalizeWappalyzerPatterns(sigDef: SignatureDefinition): Pattern[] {
         const wappalyzerTypeToOurType = (wappField: string): Pattern['type'] | null => {
             switch(wappField) {
                 case 'cookies': return 'cookie';
-                case 'dom': return 'dom'; // Special handling for DOM needed
-                case 'js': return 'jsGlobal'; // Wappalyzer 'js' often refers to globals/properties
+                case 'dom': return 'dom'; 
+                case 'js': return 'jsGlobal'; 
                 case 'headers': return 'header';
                 case 'html': return 'html';
-                case 'text': return 'html'; // Assuming 'text' in Wappalyzer means plaintext in HTML
-                case 'css': return 'css'; // Assuming CSS content matching
+                case 'text': return 'html'; 
+                case 'css': return 'css'; 
                 case 'robots': return 'robots';
-                case 'url': return 'filePath'; // Wappalyzer 'url' is like our filePath
-                case 'xhr': return 'networkRequest'; // Matching XHR URLs
+                case 'url': return 'filePath'; 
+                case 'xhr': return 'networkRequest'; 
                 case 'meta': return 'meta';
-                case 'scriptSrc': return 'script'; // Matching script src attributes
-                case 'scripts': return 'script'; // Matching script content
+                case 'scriptSrc': return 'script'; 
+                case 'scripts': return 'script'; 
                 default: return null;
             }
         };
@@ -185,27 +165,35 @@ function normalizeWappalyzerPatterns(sigDef: SignatureDefinition): Pattern[] {
                 if (typeof item === 'string') {
                     const { mainPattern, confidence, version } = parsePatternString(item);
                     patterns.push({ type: ourType, pattern: mainPattern, weight: confidence ? confidence / 100 : undefined, version });
+                } else if (item instanceof RegExp) { // Allow RegExp directly in arrays for Wappalyzer fields
+                    patterns.push({ type: ourType, pattern: item });
                 }
             });
-        } else if (typeof fieldValue === 'object') {
-            // For object types like 'cookies', 'headers', 'meta', 'js', 'dom'
-            Object.entries(fieldValue).forEach(([key, valuePattern]) => {
-                if (typeof valuePattern === 'string') {
-                    const { mainPattern: valMainPattern, confidence, version } = parsePatternString(valuePattern);
-                     patterns.push({ 
-                        type: ourType, 
-                        pattern: key, // The key (e.g., header name, cookie name)
-                        value: valMainPattern, // The pattern for the value
-                        weight: confidence ? confidence / 100 : undefined,
-                        version 
-                    });
-                } else if (valuePattern instanceof RegExp) {
-                     patterns.push({ type: ourType, pattern: key, value: valuePattern });
-                } else if (ourType === 'dom' && typeof valuePattern === 'object') {
-                    // Specific DOM structure
-                    patterns.push({ type: 'dom', pattern: key, value: valuePattern as any });
+        } else if (typeof fieldValue === 'object' && !(fieldValue instanceof RegExp)) {
+            Object.entries(fieldValue).forEach(([key, value]) => { // value can be string | RegExp
+                let valueMainPattern: string | RegExp;
+                let valueConfidence: number | undefined;
+                let valueVersion: string | undefined;
+
+                if (typeof value === 'string') {
+                    const parsedValue = parsePatternString(value);
+                    valueMainPattern = parsedValue.mainPattern;
+                    valueConfidence = parsedValue.confidence;
+                    valueVersion = parsedValue.version;
+                } else { // value is RegExp
+                    valueMainPattern = value;
                 }
+                
+                patterns.push({ 
+                    type: ourType, 
+                    pattern: key, 
+                    value: valueMainPattern, 
+                    weight: valueConfidence ? valueConfidence / 100 : undefined,
+                    version: valueVersion 
+                });
             });
+        } else if (fieldValue instanceof RegExp) { // Top-level field is a RegExp
+            patterns.push({ type: ourType, pattern: fieldValue });
         }
     });
     return patterns;
@@ -213,33 +201,52 @@ function normalizeWappalyzerPatterns(sigDef: SignatureDefinition): Pattern[] {
 
 
 // Function to transform the imported Wappalyzer-like structure
-function transformSignatures<T extends Record<string, SignatureDefinition>>(
-  categorySignatures: T,
-  categoryName: string // Added categoryName for debugging and context
+function transformSignatures(
+  categorySignaturesArray: SignatureDefinition[], 
+  categoryName: string
 ): Record<string, SignatureDefinition> {
   const transformed: Record<string, SignatureDefinition> = {};
-  for (const techName in categorySignatures) {
-    const originalSig = categorySignatures[techName];
+  categorySignaturesArray.forEach(originalSig => { 
+    const techName = originalSig.name; 
+    if (!techName) {
+      console.warn(`[Signatures] Signature in category ${categoryName} is missing a name. Skipping.`);
+      return;
+    }
     transformed[techName] = {
-      name: techName, // Ensure name is part of the object
       ...originalSig,
+      name: techName, 
       _normalizedPatterns: normalizeWappalyzerPatterns(originalSig),
-      _weight: originalSig._weight || 0.5 // Default base weight if not specified
+      _weight: originalSig._weight || 0.5 
     };
-    // If original 'patterns' or 'versions' exist (our old format), merge or prioritize
     if (originalSig.patterns) {
         transformed[techName]._normalizedPatterns = [
             ...(transformed[techName]._normalizedPatterns || []),
             ...originalSig.patterns!
         ];
     }
-     // Note: Version transformation from Wappalyzer format is more complex and not fully implemented here.
-     // This example prioritizes the '_normalizedPatterns' from Wappalyzer fields.
-  }
+  });
   return transformed;
 }
 
-const signatures: SignaturesDatabase = {
+// Import signatures from modularized files
+import { analyticsSignatures } from './signature-categories/analytics';
+import { utilityLibrariesSignatures } from './signature-categories/utility_libraries';
+import { paymentProcessorsSignatures } from './signature-categories/payment_processors';
+import { securitySignatures } from './signature-categories/security';
+import { miscellaneousSignatures } from './signature-categories/miscellaneous';
+import { cookieComplianceSignatures } from './signature-categories/cookie_compliance';
+import { selfHostedCmsSignatures } from './signature-categories/self_hosted_cms';
+import { hostedCmsSignatures } from './signature-categories/hosted_cms';
+import { cssFrameworksSignatures } from './signature-categories/css_frameworks';
+import { serverPlatformsSignatures } from './signature-categories/server_platforms';
+import { hostingProvidersSignatures } from './signature-categories/hosting_providers';
+import { reverseProxiesSignatures } from './signature-categories/reverse_proxies';
+import { programmingLanguagesSignatures } from './signature-categories/programming_languages';
+import { databasesSignatures } from './signature-categories/databases';
+import { marketingAutomationSignatures } from './signature-categories/marketing_automation';
+
+
+const signaturesDb: SignaturesDatabase = {
   analytics: transformSignatures(analyticsSignatures, 'analytics'),
   utility_libraries: transformSignatures(utilityLibrariesSignatures, 'utility_libraries'),
   payment_processors: transformSignatures(paymentProcessorsSignatures, 'payment_processors'),
@@ -267,22 +274,28 @@ function precompileSignatures(sigDb: SignaturesDatabase): SignaturesDatabase {
       const compileList = (patterns?: Pattern[]) => {
         patterns?.forEach(p => {
           // Compile p.pattern if it's a string meant to be a regex
-          if (typeof p.pattern === 'string' && 
-              p.type !== 'header' && p.type !== 'meta' && 
-              p.type !== 'cookie' && p.type !== 'jsGlobal' && 
-              p.type !== 'dom' /* DOM pattern can be selector string */) {
-            try { p.pattern = new RegExp(p.pattern.replace(/\\\\/g, '\\'), 'i'); } // Handle double escapes for regex in JSON
-            catch (e) { console.warn(`Invalid regex string for p.pattern '${p.pattern}' for ${sig.name}: ${p.type}`, e); }
+          if (typeof p.pattern === 'string') {
+            // For these types, p.pattern is a name/key, not usually a regex string unless explicitly formatted
+            const isNonRegexPatternType = p.type === 'header' || p.type === 'meta' || p.type === 'jsGlobal' || p.type === 'dom' || p.type === 'cookie';
+            if (!isNonRegexPatternType || (isNonRegexPatternType && p.pattern.startsWith('/') && p.pattern.endsWith('/'))) {
+              try { 
+                let patternString = p.pattern;
+                if (isNonRegexPatternType && patternString.startsWith('/') && patternString.endsWith('/')) {
+                    patternString = patternString.slice(1, -1); // Remove surrounding slashes for RegExp constructor
+                }
+                p.pattern = new RegExp(patternString.replace(/\\\\/g, '\\'), 'i'); 
+              } 
+              catch (e) { console.warn(`Invalid regex string for p.pattern '${p.pattern}' for ${sig.name}: ${p.type}`, e); }
+            }
           }
           // Compile p.value if it's a string meant to be a regex
           if (p.value && typeof p.value === 'string') {
             try { p.value = new RegExp(p.value.replace(/\\\\/g, '\\'), 'i'); } 
-            catch (e) { console.warn(`Invalid regex string for p.value '${p.value}' for ${sig.name}: ${p.type} - ${p.pattern}`, e); }
+            catch (e) { console.warn(`Invalid regex string for p.value '${p.value}' for ${sig.name}: ${p.type} - ${String(p.pattern)}`, e); }
           }
         });
       };
       compileList(sig._normalizedPatterns);
-      // Also compile original patterns/versions if they exist and are used (our old format)
       compileList(sig.patterns); 
       if (sig.versions) {
         compileList(sig.versions.patterns);
@@ -291,8 +304,8 @@ function precompileSignatures(sigDb: SignaturesDatabase): SignaturesDatabase {
           const versionDef = sig.versions[versionName];
           if (Array.isArray(versionDef)) {
             compileList(versionDef);
-          } else if (versionDef.patterns) {
-            compileList(versionDef.patterns);
+          } else if (typeof (versionDef as VersionDefinition).patterns === 'object') { 
+             compileList((versionDef as VersionDefinition).patterns);
           }
         }
       }
@@ -301,7 +314,7 @@ function precompileSignatures(sigDb: SignaturesDatabase): SignaturesDatabase {
   return sigDb;
 }
 
-const precompiledSignatures = precompileSignatures(JSON.parse(JSON.stringify(signatures)));
+const precompiledSignatures = precompileSignatures(JSON.parse(JSON.stringify(signaturesDb)));
 
 export interface DetectedTechnologyInfo {
   id?: string;
@@ -340,6 +353,12 @@ const extractJsVersions = (html: string, jsGlobals: string[]): Record<string, st
     const match = html.match(patterns[prop]);
     if (match && match[1]) {
       versions[prop] = match[1];
+    }
+  }
+  // Ensure all version properties are initialized, even if not found
+  for (const prop of ['$.fn.jquery', 'React.version', 'Vue.version', 'angular.version']) {
+    if (!(prop in versions)) {
+      versions[prop] = null;
     }
   }
   return versions;
@@ -388,7 +407,6 @@ const extractCookies = (setCookieStrings?: string[]): Array<{ name: string; valu
   const cookiesArr: Array<{ name: string; value: string }> = [];
   if (setCookieStrings) {
     for (const cookieStr of setCookieStrings) {
-      // Example: "session_id=abc; Path=/; HttpOnly" -> name: session_id, value: abc
       const firstPart = cookieStr.split(';')[0];
       const parts = firstPart.split('=');
       if (parts.length >= 1) {
@@ -402,27 +420,40 @@ const extractCookies = (setCookieStrings?: string[]): Array<{ name: string; valu
 const extractPotentialJsGlobals = (html: string): string[] => {
   const globals = new Set<string>();
   if (!html) return [];
-  const globalRegex = /(?:var|let|const|window)\s*([a-zA-Z_$][\w$]*)\s*(?:=|\(|\[|\.)|(?:^|\W)([a-zA-Z_$][\w$]*)\s*=\s*(?:\{|function|\(|new\s)/g;
-  let match;
-  while ((match = globalRegex.exec(html)) !== null) {
-    globals.add(match[1] || match[2]);
-  }
-  const commonLibs = ['React', 'ReactDOM', 'Vue', 'jQuery', '$', '_', 'angular', 'WPCOMGlobal', 'Shopify', 'gtag', 'ga', 'mixpanel', 'dataLayer', 'webpackJsonp', '__webpack_require__', 'OneTrust', 'Optanon', 'Stripe', 'paypal', 'bitpay', 'wp'];
-  commonLibs.forEach(lib => {
-    if (new RegExp(`\\b${lib.replace('$', '\\$')}\\b`).test(html)) {
-      globals.add(lib);
+  // Improved regex to catch more global definitions and common library references
+  const globalPatterns = [
+    /(?:var|let|const|window)\s*([a-zA-Z_$][\w$]*)\s*(?:=|\(|\[|\.)/g, // e.g. var foo = ...
+    /(?:^|\W)([a-zA-Z_$][\w$]*)\s*=\s*(?:\{|function|\(|new\s)/g,     // e.g. foo = function()...
+    /\b([a-zA-Z_$][\w$]*)\s*(?:\.\s*[a-zA-Z_$][\w$]*)+\s*\(/g,        // e.g. MyLib.someMethod(
+    /\b(React|ReactDOM|Vue|jQuery|\$|_|angular|moment|gsap|THREE|Stripe|paypal|OneTrust|Optanon|dataLayer|gtag|ga|mixpanel|analytics|fbq|twq|Shopify|wp)\b/g
+  ];
+  
+  for (const regex of globalPatterns) {
+    let match;
+    while ((match = regex.exec(html)) !== null) {
+      globals.add(match[1] || match[0]); // match[0] for the last regex group
     }
-  });
+  }
   return Array.from(globals);
 };
 
 const extractNetworkRequests = (html: string, scriptsSrc: string[], cssLinks: string[]): string[] => {
     const requests = new Set<string>();
     if (html) {
-      const urlRegex = /(['"`])(https?:\/\/[^'"`\s]+)\1/g;
+      // More comprehensive URL regex to capture various forms of URLs
+      const urlRegex = /(['"`])((?:https?:)?\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*))\1/gi;
       let match;
       while ((match = urlRegex.exec(html)) !== null) {
           requests.add(match[2]);
+      }
+       // Look for fetch() or XMLHttpRequest patterns
+      const fetchRegex = /fetch\s*\(\s*['"`]((?:https?:)?\/\/[^'"`\s]+)['"`]/gi;
+      while ((match = fetchRegex.exec(html)) !== null) {
+          requests.add(match[1]);
+      }
+      const xhrRegex = /xhr\.open\s*\([^,]+,\s*['"`]((?:https?:)?\/\/[^'"`\s]+)['"`]/gi;
+       while ((match = xhrRegex.exec(html)) !== null) {
+          requests.add(match[1]);
       }
     }
     scriptsSrc.forEach(s => requests.add(s));
@@ -463,15 +494,11 @@ function checkSinglePattern(
   let match = false;
   let version: string | null = null;
   let matchedString: string | undefined;
-  let confidenceFactor = patternDef.weight !== undefined ? patternDef.weight : 1.0; // Default from pattern
+  let confidenceFactor = patternDef.weight !== undefined ? patternDef.weight : 1.0; 
 
-  // Wappalyzer-style confidence and version extraction from pattern string itself
-  if (patternDef.confidence) { // e.g. ";confidence:50" parsed into patternDef.confidence string
+  if (patternDef.confidence) { 
       const confValue = parseInt(patternDef.confidence.split(':')[1], 10);
       if (!isNaN(confValue)) confidenceFactor = confValue / 100;
-  }
-  if (patternDef.version) { // e.g. ";version:\\1"
-      // Version extraction logic will use this later with regex exec result
   }
 
   const testRegex = (textToTest: string | undefined, regex: RegExp, versionTemplate?: string, versionGroup?: number) => {
@@ -480,7 +507,7 @@ function checkSinglePattern(
     if (execResult) {
       match = true;
       matchedString = execResult[0]; 
-      if (versionTemplate) { // Wappalyzer style like \\1 or \\1?foo:bar
+      if (versionTemplate) { 
           version = resolveVersionTemplate(versionTemplate, execResult);
       } else if (versionGroup && execResult[versionGroup]) {
         version = execResult[versionGroup];
@@ -488,17 +515,17 @@ function checkSinglePattern(
     }
   };
   
-  const testString = (textToTest: string | undefined, str: string) => {
-     if (typeof textToTest === 'string' && textToTest.toLowerCase().includes(str.toLowerCase())) {
-         match = true;
-         matchedString = str; 
-     }
-  };
+ const testString = (textToTest: string | undefined, str: string, isCaseSensitive: boolean = false) => {
+    if (typeof textToTest === 'string' && typeof str === 'string') {
+        if (isCaseSensitive ? textToTest.includes(str) : textToTest.toLowerCase().includes(str.toLowerCase())) {
+            match = true;
+            matchedString = str;
+        }
+    }
+ };
 
-  // Wappalyzer-style version template resolution
+
   const resolveVersionTemplate = (template: string, execResult: RegExpExecArray): string | null => {
-    // Example: \\1?foo:bar or \\1
-    // This is a simplified resolver. Wappalyzer's is more complex.
     return template.replace(/\\(\d+)/g, (m, groupIndexStr) => {
         const groupIndex = parseInt(groupIndexStr, 10);
         return execResult[groupIndex] || '';
@@ -525,6 +552,9 @@ function checkSinglePattern(
       else if (typeof patternDef.pattern === 'string') extractedCssLinks.forEach(link => testString(link, patternDef.pattern as string));
       break;
     case 'header':
+      if (typeof patternDef.pattern !== 'string') {
+        break;
+      }
       const headerKey = (patternDef.pattern as string).toLowerCase(); 
       const headerVal = responseHeaders[headerKey];
       if (headerVal) {
@@ -532,10 +562,7 @@ function checkSinglePattern(
         if (patternDef.value instanceof RegExp) {
           testRegex(headerValStr, patternDef.value, patternDef.version, patternDef.versionCaptureGroup);
         } else if (typeof patternDef.value === 'string') {
-          if(headerValStr.toLowerCase().includes(patternDef.value.toLowerCase())) {
-              match = true;
-              matchedString = `${headerKey}: ${patternDef.value}`;
-          }
+           testString(headerValStr, patternDef.value); // Header values can be case sensitive, use default case-insensitive for now
         } else { 
           match = true;
           matchedString = headerKey;
@@ -543,39 +570,57 @@ function checkSinglePattern(
       }
       break;
     case 'meta':
-      const metaKey = (patternDef.pattern as string).toLowerCase(); 
-      if (extractedMetaTags[metaKey]) {
-        if (patternDef.value instanceof RegExp) { 
-          testRegex(extractedMetaTags[metaKey], patternDef.value, patternDef.version, patternDef.versionCaptureGroup);
-        } else if (typeof patternDef.value === 'string') {
-           if(extractedMetaTags[metaKey].toLowerCase().includes(patternDef.value.toLowerCase())){
-               match = true;
-               matchedString = `${metaKey}=${patternDef.value}`;
-           }
-        } else if (typeof patternDef.value === 'undefined') { 
-          match = true;
-          matchedString = metaKey;
+      if (typeof patternDef.pattern !== 'string' || (typeof patternDef.pattern === 'string' && !patternDef.pattern)) {
+         break;
+      }
+      const metaKey = (patternDef.pattern as any).name ? (patternDef.pattern as any).name.toLowerCase() : String(patternDef.pattern).toLowerCase();
+      const metaContentPattern = (patternDef.pattern as any).content;
+
+      if(metaContentPattern) { // If meta signature is { name: "og:title", content: /somePattern/ }
+        if (extractedMetaTags[metaKey] && metaContentPattern instanceof RegExp) {
+            testRegex(extractedMetaTags[metaKey], metaContentPattern, patternDef.version, patternDef.versionCaptureGroup);
+        } else if (extractedMetaTags[metaKey] && typeof metaContentPattern === 'string') {
+            testString(extractedMetaTags[metaKey], metaContentPattern);
         }
+      } else if (extractedMetaTags[metaKey]) { // If meta signature is { name: "og:title" } or just "og:title" for existence
+         if (patternDef.value instanceof RegExp) { 
+            testRegex(extractedMetaTags[metaKey], patternDef.value, patternDef.version, patternDef.versionCaptureGroup);
+         } else if (typeof patternDef.value === 'string') {
+            testString(extractedMetaTags[metaKey], patternDef.value);
+         } else if (patternDef.value === undefined || patternDef.value === null || (typeof patternDef.value === 'object' && Object.keys(patternDef.value).length === 0 )) { 
+            match = true;
+            matchedString = metaKey;
+         }
       }
       break;
     case 'cookie':
         parsedCookies.forEach(cookie => {
+            if (match) return; 
             let nameMatches = false;
-            if (patternDef.pattern instanceof RegExp) {
+            // Handle patternDef.pattern which could be a string (literal or regex string) or a RegExp object
+            if (typeof patternDef.pattern === 'string') {
+                if (patternDef.pattern.startsWith('/') && patternDef.pattern.endsWith('/')) { // It's a regex string like "/^_ga/i"
+                    try {
+                        const cookieNameRegex = new RegExp(patternDef.pattern.slice(1, -1), 'i');
+                        if (cookieNameRegex.test(cookie.name)) nameMatches = true;
+                    } catch (e) {
+                        // console.warn(`[Signatures] Invalid regex string for cookie name pattern: ${patternDef.pattern}`, e);
+                        if (cookie.name.toLowerCase() === patternDef.pattern.toLowerCase()) nameMatches = true; // Fallback to literal match
+                    }
+                } else { // It's a literal string
+                    if (cookie.name.toLowerCase() === patternDef.pattern.toLowerCase()) nameMatches = true;
+                }
+            } else if (patternDef.pattern instanceof RegExp) { // It's already a RegExp object
                 if (patternDef.pattern.test(cookie.name)) nameMatches = true;
-            } else if (typeof patternDef.pattern === 'string' && cookie.name.toLowerCase() === patternDef.pattern.toLowerCase()) {
-                nameMatches = true;
             }
+
 
             if (nameMatches) {
                 if (patternDef.value instanceof RegExp) { 
                     testRegex(cookie.value, patternDef.value, patternDef.version, patternDef.versionCaptureGroup);
                 } else if (typeof patternDef.value === 'string') {
-                    if(cookie.value.toLowerCase().includes(patternDef.value.toLowerCase())){
-                        match = true;
-                        matchedString = `${cookie.name}=${patternDef.value}`;
-                    }
-                } else { 
+                   testString(cookie.value, patternDef.value);
+                } else if (patternDef.value === undefined || patternDef.value === null) { 
                     match = true;
                     matchedString = cookie.name;
                 }
@@ -583,13 +628,17 @@ function checkSinglePattern(
         });
         break;
     case 'jsGlobal': 
-      const globalName = patternDef.pattern as string;
+      const globalName = typeof patternDef.pattern === 'string' ? patternDef.pattern : String(patternDef.pattern); // Ensure it's a string
       if (extractedJsGlobals.some(g => g === globalName || (g && g.startsWith(globalName + ".")) ) ) { 
         match = true;
         matchedString = globalName;
-        // Version detection for JS globals often needs specific logic or Wappalyzer's 'js' field with value patterns
-        if (patternDef.value instanceof RegExp && javaScriptVersions[globalName]) { // Assuming versionProperty for jsGlobal is the globalName itself
+        if (patternDef.value instanceof RegExp && javaScriptVersions[globalName]) { 
              testRegex(javaScriptVersions[globalName], patternDef.value, patternDef.version, patternDef.versionCaptureGroup);
+        } else if (typeof patternDef.versionProperty === 'string' && javaScriptVersions[patternDef.versionProperty] !== null) {
+            // This handles the case where patternDef.pattern is the global name like "jQuery"
+            // and patternDef.versionProperty is "$.fn.jquery"
+            // We need to extract version using the versionProperty
+            version = javaScriptVersions[patternDef.versionProperty];
         }
       }
       break;
@@ -598,12 +647,16 @@ function checkSinglePattern(
       else if (typeof patternDef.pattern === 'string') extractedNetworkRequests.forEach(req => testString(req, patternDef.pattern as string));
       break;
     case 'jsVersion': 
-      if (patternDef.versionProperty && javaScriptVersions[patternDef.versionProperty]) {
+      if (patternDef.versionProperty && javaScriptVersions[patternDef.versionProperty] !== null) {
         const verStr = javaScriptVersions[patternDef.versionProperty];
         if (verStr && patternDef.pattern instanceof RegExp) {
-          // Here, patternDef.pattern is the regex to match against the version string.
-          // patternDef.version is the Wappalyzer template like \\1
           testRegex(verStr, patternDef.pattern as RegExp, patternDef.version, patternDef.versionCaptureGroup || 1);
+        } else if (verStr && typeof patternDef.pattern === 'string') { // If pattern is a string, direct match
+            if (verStr === patternDef.pattern) {
+                match = true;
+                version = verStr;
+                matchedString = `${patternDef.versionProperty}: ${verStr}`;
+            }
         }
       }
       break;
@@ -624,20 +677,20 @@ function checkSinglePattern(
         else if (errorPageContent && typeof patternDef.pattern === 'string') testString(errorPageContent, patternDef.pattern as string);
         break;
     case 'dom':
-        // DOM matching requires a DOM parser (like jsdom, or client-side browser)
-        // This is a placeholder. Real DOM matching is complex server-side without a browser env.
-        // If htmlContent is available, you could do string matching for simple selectors.
-        if (typeof patternDef.pattern === 'string' && htmlContent) { // pattern is CSS selector
-            // Simplistic check: does the selector appear in the HTML?
-            // This is NOT a real DOM query.
-            if (htmlContent.includes(patternDef.pattern.replace(/[#.]/g, ''))) { // Basic string check
-                // Further checks for attributes/text if patternDef.value is an object
+        // Basic DOM check based on string inclusion, for more complex DOM checks, JSDOM or similar would be needed server-side
+        // This current implementation of 'dom' type is limited for server-side string-based matching
+        if (typeof patternDef.pattern === 'string' && htmlContent) { 
+            const selector = patternDef.pattern; // e.g., "#example-id" or ".example-class" or "div[data-example]"
+            // Simple check if selector-like string exists (highly approximate)
+            const simplifiedSelector = selector.replace(/[#.]/g, '').replace(/\[.*?\]/g, ''); // Remove #, ., [attr=val] for basic check
+            if (htmlContent.includes(simplifiedSelector)) { 
                 if (typeof patternDef.value === 'object' && patternDef.value !== null) {
                     const domValue = patternDef.value as {exists?: string, attributes?: Record<string, string|RegExp>, text?: string|RegExp};
-                    if (domValue.exists) match = true; // Simple existence
-                    // Add more complex attribute/text checks if needed, would require regex on HTML snippets
+                    // For `exists` type DOM check, if simplifiedSelector is found, consider it a match
+                    if (domValue.exists !== undefined) match = true; 
+                    // Advanced attribute/text checks would require actual DOM parsing, not feasible with regex alone on raw HTML string
                 } else {
-                   match = true; // Selector string found
+                   match = true; // If no specific value checks, existence of simplified selector is enough for basic match
                 }
                 if (match) matchedString = patternDef.pattern;
             }
@@ -667,7 +720,7 @@ export async function detectTechnologies(
   const extractedScripts = extractScripts(htmlContent);
   const extractedCssLinks = extractCssLinks(htmlContent);
   const extractedMetaTags = extractMetaTags(htmlContent);
-  const parsedCookies = extractCookies(setCookieStrings); // Use setCookieStrings
+  const parsedCookies = extractCookies(setCookieStrings); 
   const extractedJsGlobals = extractPotentialJsGlobals(htmlContent);
   const extractedNetworkRequests = extractNetworkRequests(htmlContent, extractedScripts.src, extractedCssLinks);
   const extractedHtmlComments = extractHtmlComments(htmlContent);
@@ -676,7 +729,15 @@ export async function detectTechnologies(
   let robotsContent: string | null = null;
   const needsRobotsTxt = Object.values(precompiledSignatures).some(category => 
     Object.values(category).some(sig => 
-        (sig._normalizedPatterns || []).some(p => p.type === 'robots')
+        (sig._normalizedPatterns || []).some(p => p.type === 'robots') ||
+        (sig.patterns || []).some(p => p.type === 'robots') ||
+        (sig.versions && Object.values(sig.versions).some(vDefOrPatterns => {
+            if(Array.isArray(vDefOrPatterns)) return vDefOrPatterns.some(p => p.type === 'robots');
+            if (typeof vDefOrPatterns === 'object' && (vDefOrPatterns as VersionDefinition).patterns) {
+                 return (vDefOrPatterns as VersionDefinition).patterns.some(p => p.type === 'robots');
+            }
+            return false;
+        }))
     )
   );
 
@@ -716,13 +777,12 @@ export async function detectTechnologies(
 
           if (result.match) {
             techMatchOccurred = true;
-            let patternBaseWeight = baseSigConfidence / 100; // Default to tech's base weight
+            let patternBaseWeight = baseSigConfidence / 100; 
 
-            // If processing patterns for a specific version (our old format)
             if (currentVersionNameForContext && sigDef.versions && sigDef.versions[currentVersionNameForContext]) {
                 const versionInfo = sigDef.versions[currentVersionNameForContext];
-                if (!Array.isArray(versionInfo) && versionInfo.weight !== undefined) {
-                    patternBaseWeight = versionInfo.weight;
+                if (!Array.isArray(versionInfo) && (versionInfo as VersionDefinition).weight !== undefined) {
+                    patternBaseWeight = (versionInfo as VersionDefinition).weight!;
                 }
             }
             
@@ -738,56 +798,57 @@ export async function detectTechnologies(
               techPrimaryMatchedValue = result.matchedValue; 
               techPrimaryDetectionMethod = `Type: ${pDef.type}, Pattern: ${String(pDef.pattern).substring(0,50)}${pDef.value ? `, Value: ${String(pDef.value).substring(0,30)}` : ''}`;
             }
+            
+            // If pattern has a version string, use it directly (e.g. from Wappalyzer's "version:\\1")
+            if (pDef.version && typeof pDef.version === 'string' && !techDetectedVersion) {
+                techDetectedVersion = pDef.version; // This might need further processing if it contains backreferences
+            }
+
+
             if (pDef.implies) pDef.implies.forEach(imp => accumulatedImplications.add(imp));
           }
         }
       };
       
-      // Process normalized patterns (from Wappalyzer fields or our _normalizedPatterns)
       processPatternsList(sigDef._normalizedPatterns);
 
-      // Process our original `versions` object if it exists
       if (sigDef.versions) {
         const globalVersionProp = sigDef.versions.versionProperty || sigDef.versionProperty;
         if (globalVersionProp && javaScriptVersions[globalVersionProp]) {
             const currentVersion = javaScriptVersions[globalVersionProp];
-            // If a global version is found, try to match it with a named version or use it directly
             let versionMatchedByName = false;
             for (const versionName in sigDef.versions) {
                  if (versionName === 'patterns' || versionName === 'versionProperty') continue;
-                 if (currentVersion && versionName.includes(currentVersion.split('.')[0])) { // Simple major version match
+                 if (currentVersion && versionName.includes(currentVersion.split('.')[0])) { 
                     const versionDetail = sigDef.versions[versionName];
                     if (Array.isArray(versionDetail)) {
                         processPatternsList(versionDetail, versionName);
-                    } else {
-                        processPatternsList(versionDetail.patterns, versionName);
+                    } else if (typeof versionDetail === 'object' && (versionDetail as VersionDefinition).patterns){
+                        processPatternsList((versionDetail as VersionDefinition).patterns, versionName);
                     }
-                    if (techMatchOccurred) techDetectedVersion = techDetectedVersion || versionName; // Prioritize named version
+                    if (techMatchOccurred) techDetectedVersion = techDetectedVersion || versionName; 
                     versionMatchedByName = true;
                     break;
                  }
             }
-            if (techMatchOccurred && !techDetectedVersion && currentVersion) { // If match but no named version, use JS version
+            if (techMatchOccurred && !techDetectedVersion && currentVersion) { 
                 techDetectedVersion = currentVersion;
             }
         }
-        // Process patterns within each named version definition
         for (const versionName in sigDef.versions) {
             if (versionName === 'patterns' || versionName === 'versionProperty') continue;
             const versionDetail = sigDef.versions[versionName];
             if (Array.isArray(versionDetail)) {
                 processPatternsList(versionDetail, versionName);
-            } else {
-                processPatternsList(versionDetail.patterns, versionName);
+            } else if (typeof versionDetail === 'object' && (versionDetail as VersionDefinition).patterns){
+                processPatternsList((versionDetail as VersionDefinition).patterns, versionName);
             }
         }
-        // Process fallback patterns in sigDef.versions.patterns
         if (sigDef.versions.patterns) {
             processPatternsList(sigDef.versions.patterns);
         }
       }
       
-      // Process general patterns from sigDef.patterns (our old format)
       processPatternsList(sigDef.patterns);
 
 
@@ -809,7 +870,7 @@ export async function detectTechnologies(
             version: techDetectedVersion,
             confidence: finalConfidence,
             category: categoryName,
-            categories: sigDef.cats?.map(String), // Assuming cats are numbers, convert to string array
+            categories: sigDef.cats?.map(String), 
             website: sigDef.website,
             icon: sigDef.icon,
             matchedValue: techPrimaryMatchedValue,
@@ -830,10 +891,9 @@ export async function detectTechnologies(
     }
   }
 
-  // --- Post-processing Pass (Implications, Excludes, Requires) ---
   let finalDetections = Array.from(detectedTechMap.values());
   let changedInPass = true;
-  let maxPasses = 5; // Prevent infinite loops
+  let maxPasses = 5; 
   let currentPass = 0;
   
   while(changedInPass && currentPass < maxPasses){
@@ -842,7 +902,6 @@ export async function detectTechnologies(
     const currentDetectionNames = new Set(finalDetections.map(t => t.technology));
     const numDetectionsBeforePass = finalDetections.length;
 
-    // 1. Apply 'requires' and 'requiresCategory'
     finalDetections = finalDetections.filter(tech => {
       const meta = tech._meta;
       if (!meta) return true;
@@ -850,7 +909,6 @@ export async function detectTechnologies(
       if (meta.requires) {
         const reqs = Array.isArray(meta.requires) ? meta.requires : [meta.requires];
         if (!reqs.every(reqName => currentDetectionNames.has(reqName.split('\\;')[0]))) {
-          console.log(`[Signatures] Removing ${tech.technology} due to missing requirement: ${reqs.find(r => !currentDetectionNames.has(r.split('\\;')[0]))}`);
           return false;
         }
       }
@@ -859,7 +917,6 @@ export async function detectTechnologies(
         if (!reqCats.some(reqCatName =>
           finalDetections.some(d => (d.category === reqCatName || d.categories?.includes(reqCatName)) && d.technology !== tech.technology)
         )) {
-          console.log(`[Signatures] Removing ${tech.technology} due to missing category requirement: ${reqCats.join(', ')}`);
           return false;
         }
       }
@@ -871,7 +928,6 @@ export async function detectTechnologies(
     detectedTechMap = new Map(finalDetections.map(t => [t.technology, t]));
     const currentActiveTechNames = new Set(finalDetections.map(t => t.technology));
 
-    // 2. Apply 'excludes'
     const excludedTechNamesThisPass = new Set<string>();
     for (const tech of finalDetections) {
       const meta = tech._meta;
@@ -880,13 +936,9 @@ export async function detectTechnologies(
         exclusions.forEach(exNamePattern => {
           const exName = exNamePattern.split('\\;')[0];
           if (currentActiveTechNames.has(exName)) {
-            // Find the tech to be excluded
             const techToExclude = finalDetections.find(t => t.technology === exName);
             const excludingTech = tech;
-            // Simplistic: exclude if confidences are similar or excluder is higher.
-            // Wappalyzer might have more nuanced logic.
-            if (techToExclude && excludingTech.confidence >= techToExclude.confidence * 0.9) { // Be a bit lenient
-                 console.log(`[Signatures] ${tech.technology} (conf: ${tech.confidence}) excludes ${exName} (conf: ${techToExclude.confidence}). Adding ${exName} to exclusion list.`);
+            if (techToExclude && excludingTech.confidence >= techToExclude.confidence * 0.9) { 
                  excludedTechNamesThisPass.add(exName);
             }
           }
@@ -901,11 +953,10 @@ export async function detectTechnologies(
     
     detectedTechMap = new Map(finalDetections.map(t => [t.technology, t]));
 
-    // 3. Apply 'implies' (iteratively within the main loop)
     let newImpliesMadeThisSubIteration;
     do {
         newImpliesMadeThisSubIteration = false;
-        for (const tech of Array.from(detectedTechMap.values())) { // Iterate over current state of map
+        for (const tech of Array.from(detectedTechMap.values())) { 
             const meta = tech._meta;
             if (meta?.implies) {
                 const implications = Array.isArray(meta.implies) ? meta.implies : [meta.implies];
@@ -929,9 +980,7 @@ export async function detectTechnologies(
                         }
 
                         if (impliedSigDef && impliedCategoryKey) {
-                            console.log(`[Signatures] ${tech.technology} implies ${impliedName}. Adding.`);
                             const impliedBaseConf = impliedSigDef._weight !== undefined ? impliedSigDef._weight * 100 : 30;
-                            // Implied confidence can be: override, factor of implying tech's conf, or base implied conf
                             let finalImpliedConfidence = impliedBaseConf;
                             if (impliedConfidenceOverride !== undefined) {
                                 finalImpliedConfidence = impliedConfidenceOverride;
@@ -941,7 +990,7 @@ export async function detectTechnologies(
                             
                             const newImpliedTech: DetectedTechnologyInfo = {
                                 technology: impliedName,
-                                version: null, // Version from implies is complex, not handled here
+                                version: null, 
                                 confidence: finalImpliedConfidence,
                                 category: impliedCategoryKey,
                                 categories: impliedSigDef.cats?.map(String),
@@ -955,13 +1004,11 @@ export async function detectTechnologies(
                                     requiresCategory: impliedSigDef.requiresCategory
                                 }
                             };
-                            detectedTechMap.set(impliedName, newImpliedTech); // Add to map
-                            // finalDetections will be rebuilt from map after implies loop
+                            detectedTechMap.set(impliedName, newImpliedTech); 
                             newImpliesMadeThisSubIteration = true;
                             if(!changedInPass) changedInPass = true;
                         }
                     } else {
-                        // Implied tech already exists, potentially update confidence
                         const existingImplied = detectedTechMap.get(impliedName)!;
                         let newConfidence = existingImplied.confidence;
                          if (impliedConfidenceOverride !== undefined) {
@@ -971,13 +1018,13 @@ export async function detectTechnologies(
                         }
                         if (newConfidence > existingImplied.confidence) {
                             existingImplied.confidence = newConfidence;
-                            if(!changedInPass) changedInPass = true; // Confidence update counts as a change
+                            if(!changedInPass) changedInPass = true; 
                         }
                     }
                 });
             }
         }
-        if(newImpliesMadeThisSubIteration) { // If implies added new techs, rebuild finalDetections for next pass
+        if(newImpliesMadeThisSubIteration) { 
             finalDetections = Array.from(detectedTechMap.values());
         }
     } while (newImpliesMadeThisSubIteration);
@@ -991,17 +1038,15 @@ export async function detectTechnologies(
 
 
 // Functions to manage signatures dynamically (if needed, currently not used by main flow but good for extensibility)
-export function addSignature(category: keyof SignaturesDatabase, techName: string, signature: SignatureDefinition) {
-  if (!precompiledSignatures[category]) {
-    (precompiledSignatures[category] as Record<string, SignatureDefinition>) = {};
+export function addSignature(categoryKey: keyof SignaturesDatabase, techName: string, signature: SignatureDefinition) {
+  if (!precompiledSignatures[categoryKey]) {
+    (precompiledSignatures[categoryKey] as Record<string, SignatureDefinition>) = {};
   }
-  // Precompile the new signature before adding
   const tempSigContainer = { [techName]: signature };
-  const tempCatContainer = { [category]: tempSigContainer } as unknown as SignaturesDatabase; 
-  precompileSignatures(tempCatContainer); // This will modify signature in tempSigContainer
+  const tempCatContainer = { [categoryKey]: tempSigContainer } as unknown as SignaturesDatabase; 
+  precompileSignatures(tempCatContainer); 
 
-  precompiledSignatures[category][techName] = tempSigContainer[techName];
-  console.log(`[Signatures] Added signature "${techName}" to category "${category}".`);
+  precompiledSignatures[categoryKey][techName] = tempCatContainer[categoryKey][techName];
 }
 
 export function deleteSignatureByName(nameToDelete: string): boolean {
@@ -1011,12 +1056,8 @@ export function deleteSignatureByName(nameToDelete: string): boolean {
     if (category[nameToDelete]) {
       delete category[nameToDelete];
       deleted = true;
-      console.log(`[Signatures] Deleted signature "${nameToDelete}" from category "${categoryKey}".`);
       break; 
     }
-  }
-  if (!deleted) {
-    console.log(`[Signatures] Signature "${nameToDelete}" not found for deletion.`);
   }
   return deleted;
 }
