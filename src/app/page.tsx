@@ -9,6 +9,12 @@ import { LoadingState } from '@/components/features/tech-detective/LoadingState'
 import { handleAnalyzeWebsite, type FormState } from './actions';
 import type { WebsiteAnalysisResult } from '@/services/website-analysis';
 import Image from 'next/image';
+// Assuming image.png is located in src/images/image.png
+// If your project structure is different or you have an alias for 'src/images', adjust the path.
+// For example, if 'images' is directly under 'src', the path would be '../images/image.png'.
+// If 'images' is under 'public', it would be '/images/image.png' (string literal, not import).
+// Given "src/images/image.png", an import from a relative path from src/app/ is appropriate.
+import siteImage from '../../../images/image.png'; // Relative path from src/app/page.tsx to src/images/image.png
 
 export default function Home() {
   const [analysisResult, setAnalysisResult] = useState<WebsiteAnalysisResult | null>(null);
@@ -37,9 +43,9 @@ export default function Home() {
         <div className="w-full max-w-4xl">
           <div className="text-center mb-10">
             <Image 
-              src="https://picsum.photos/seed/techdetectivemain/600/250" 
-              alt="Abstract technology background representing web analysis"
-              data-ai-hint="technology abstract"
+              src={siteImage} 
+              alt="Website main visual" // Replace with a more descriptive alt text for image.png
+              data-ai-hint="website visual" // Generic hint, adjust if more context for image.png
               width={600} 
               height={250} 
               className="rounded-lg mx-auto mb-6 shadow-xl border border-border"

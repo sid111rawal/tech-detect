@@ -17,6 +17,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'Tech Detective',
   description: 'Analyze websites for hidden technologies and security concerns.',
+  icons: {
+    icon: '/favicon.ico', // This will point to src/app/favicon.ico as Next.js serves it from the root
+  },
 };
 
 export default function RootLayout({
