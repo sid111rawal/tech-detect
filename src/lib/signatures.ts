@@ -6,6 +6,8 @@
  */
 import type { PageContentResult } from '@/services/page-retriever'; // Ensure this matches the updated interface
 import { retrieveRobotsTxt } from '@/services/page-retriever';
+import type { SslCertificateInfo } from '@/services/network-info';
+
 
 // Define the structure for a single pattern within a signature
 export interface Pattern {
@@ -321,7 +323,7 @@ export interface DetectedTechnologyInfo {
   technology: string;
   version: string | null;
   confidence: number; // 0-100
-  isHarmful?: boolean;
+  isHarmful?: boolean; // To be determined by separate logic if needed
   detectionMethod?: string;
   category: string; 
   categories?: string[]; 
@@ -334,6 +336,13 @@ export interface DetectedTechnologyInfo {
     requiresCategory?: string | string[];
     excludes?: string | string[];
   };
+}
+
+export interface RedFlag {
+  type: string; // e.g., "Missing Security Header", "Outdated Software", "SSL Issue"
+  message: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  recommendation?: string;
 }
 
 
@@ -423,8 +432,8 @@ const extractPotentialJsGlobals = (html: string): string[] => {
   // Improved regex to catch more global definitions and common library references
   const globalPatterns = [
     /(?:var|let|const|window)\s*([a-zA-Z_$][\w$]*)\s*(?:=|\(|\[|\.)/g, // e.g. var foo = ...
-    /(?:^|\W)([a-zA-Z_$][\w$]*)\s*=\s*(?:\{|function|\(|new\s)/g,     // e.g. foo = function()...
-    /\b([a-zA-Z_$][\w$]*)\s*(?:\.\s*[a-zA-Z_$][\w$]*)+\s*\(/g,        // e.g. MyLib.someMethod(
+    /(?:^|\W)([a-zA-Z_$][\w$]*)\s*=\s*(?:\{|function|\(|new\s)/g, // e.g. foo = function()...
+    /\b([a-zA-Z_$][\w$]*)\s*(?:\.\s*[a-zA-Z_$][\w$]*)+\s*\(/g, // e.g. MyLib.someMethod(
     /\b(React|ReactDOM|Vue|jQuery|\$|_|angular|moment|gsap|THREE|Stripe|paypal|OneTrust|Optanon|dataLayer|gtag|ga|mixpanel|analytics|fbq|twq|Shopify|wp)\b/g
   ];
   
@@ -573,24 +582,22 @@ function checkSinglePattern(
       if (typeof patternDef.pattern !== 'string' || (typeof patternDef.pattern === 'string' && !patternDef.pattern)) {
          break;
       }
-      const metaKey = (patternDef.pattern as any).name ? (patternDef.pattern as any).name.toLowerCase() : String(patternDef.pattern).toLowerCase();
-      const metaContentPattern = (patternDef.pattern as any).content;
+      // Handle pattern being { name: 'meta-name', content: 'meta-content-pattern' } or just 'meta-name'
+      const metaNameFromPattern = (typeof patternDef.pattern === 'object' && patternDef.pattern.name) ? patternDef.pattern.name : String(patternDef.pattern);
+      const metaKey = metaNameFromPattern.toLowerCase();
+      const metaContentPattern = (typeof patternDef.pattern === 'object' && patternDef.pattern.content) ? patternDef.pattern.content : patternDef.value;
 
-      if(metaContentPattern) { // If meta signature is { name: "og:title", content: /somePattern/ }
-        if (extractedMetaTags[metaKey] && metaContentPattern instanceof RegExp) {
+
+      if (extractedMetaTags[metaKey]) { // Meta tag with this name exists
+        if (metaContentPattern instanceof RegExp) {
             testRegex(extractedMetaTags[metaKey], metaContentPattern, patternDef.version, patternDef.versionCaptureGroup);
-        } else if (extractedMetaTags[metaKey] && typeof metaContentPattern === 'string') {
+        } else if (typeof metaContentPattern === 'string') {
             testString(extractedMetaTags[metaKey], metaContentPattern);
-        }
-      } else if (extractedMetaTags[metaKey]) { // If meta signature is { name: "og:title" } or just "og:title" for existence
-         if (patternDef.value instanceof RegExp) { 
-            testRegex(extractedMetaTags[metaKey], patternDef.value, patternDef.version, patternDef.versionCaptureGroup);
-         } else if (typeof patternDef.value === 'string') {
-            testString(extractedMetaTags[metaKey], patternDef.value);
-         } else if (patternDef.value === undefined || patternDef.value === null || (typeof patternDef.value === 'object' && Object.keys(patternDef.value).length === 0 )) { 
+        } else if (metaContentPattern === undefined || metaContentPattern === null || (typeof metaContentPattern === 'object' && Object.keys(metaContentPattern).length === 0 )) { 
+            // No content pattern specified, or value for meta tag is not specified, just existence check
             match = true;
             matchedString = metaKey;
-         }
+        }
       }
       break;
     case 'cookie':
@@ -705,15 +712,17 @@ function checkSinglePattern(
 
 export async function detectTechnologies(
   pageData: PageContentResult,
-  finalUrl: string
-): Promise<DetectedTechnologyInfo[]> {
+  finalUrl: string,
+  sslInfo: SslCertificateInfo | null
+): Promise<{ technologies: DetectedTechnologyInfo[], redFlags: RedFlag[] }> {
   let detectedTechMap: Map<string, DetectedTechnologyInfo> = new Map();
+  const redFlags: RedFlag[] = [];
 
   const { html, headers = {}, setCookieStrings, status } = pageData;
 
   if (!html && Object.keys(headers).length === 0) {
     console.log("[Signatures] No HTML or headers to analyze.");
-    return [];
+    return { technologies: [], redFlags: [] };
   }
   const htmlContent = html || "";
 
@@ -750,6 +759,78 @@ export async function detectTechnologies(
   }
   
   const errorPageContent = (status && status >= 400) ? htmlContent : null;
+
+  // --- Red Flag Generation ---
+  // Missing HSTS
+  if (!headers['strict-transport-security']) {
+    redFlags.push({
+      type: "Missing Security Header",
+      message: "Strict-Transport-Security (HSTS) header is not set. This makes the site vulnerable to SSL stripping attacks.",
+      severity: "medium",
+      recommendation: "Implement HSTS header to enforce HTTPS."
+    });
+  }
+  // Missing CSP
+  if (!headers['content-security-policy'] && !extractedMetaTags['content-security-policy']) {
+    redFlags.push({
+      type: "Missing Security Header",
+      message: "Content-Security-Policy (CSP) is not configured. This increases risk of XSS attacks.",
+      severity: "medium",
+      recommendation: "Implement CSP to control resources the browser is allowed to load."
+    });
+  }
+
+  // SSL Certificate Issues
+  if (sslInfo) {
+    if (sslInfo.error) {
+      redFlags.push({
+        type: "SSL Issue",
+        message: `SSL Certificate Error: ${sslInfo.error}`,
+        severity: "high",
+        recommendation: "Investigate and resolve the SSL certificate problem immediately."
+      });
+    } else if (sslInfo.validTo) {
+      const expiryDate = new Date(sslInfo.validTo);
+      const now = new Date();
+      const daysUntilExpiry = (expiryDate.getTime() - now.getTime()) / (1000 * 3600 * 24);
+      if (daysUntilExpiry < 0) {
+        redFlags.push({
+          type: "SSL Issue",
+          message: `SSL Certificate has expired on ${sslInfo.validTo}.`,
+          severity: "critical",
+          recommendation: "Renew the SSL certificate immediately."
+        });
+      } else if (daysUntilExpiry < 30) {
+        redFlags.push({
+          type: "SSL Issue",
+          message: `SSL Certificate is expiring soon (on ${sslInfo.validTo}, in ${Math.round(daysUntilExpiry)} days).`,
+          severity: "medium",
+          recommendation: "Renew the SSL certificate before it expires."
+        });
+      }
+    }
+  } else {
+     redFlags.push({
+        type: "SSL Issue",
+        message: "Could not retrieve SSL certificate information. The site might not be using HTTPS or is not reachable on port 443.",
+        severity: "medium",
+        recommendation: "Ensure the website is accessible via HTTPS and has a valid SSL certificate."
+      });
+  }
+
+  // Check for outdated jQuery as an example (could be expanded)
+  const jQueryVersion = javaScriptVersions['$.fn.jquery'];
+  if (jQueryVersion) {
+    const majorVersion = parseInt(jQueryVersion.split('.')[0], 10);
+    if (majorVersion < 3) {
+      redFlags.push({
+        type: "Outdated Software",
+        message: `Using an outdated version of jQuery (${jQueryVersion}). This may have known security vulnerabilities.`,
+        severity: "medium",
+        recommendation: "Update jQuery to the latest stable version (3.x or higher)."
+      });
+    }
+  }
 
 
   for (const categoryName in precompiledSignatures) {
@@ -938,7 +1019,7 @@ export async function detectTechnologies(
           if (currentActiveTechNames.has(exName)) {
             const techToExclude = finalDetections.find(t => t.technology === exName);
             const excludingTech = tech;
-            if (techToExclude && excludingTech.confidence >= techToExclude.confidence * 0.9) { 
+            if (excludingTech.confidence >= techToExclude.confidence * 0.9) { 
                  excludedTechNamesThisPass.add(exName);
             }
           }
@@ -1030,10 +1111,12 @@ export async function detectTechnologies(
     } while (newImpliesMadeThisSubIteration);
   } 
 
-  return finalDetections.map(tech => {
+  const technologies = finalDetections.map(tech => {
     const { _meta, ...rest } = tech;
     return rest as DetectedTechnologyInfo;
   }).sort((a, b) => b.confidence - a.confidence || a.technology.localeCompare(b.technology)); 
+
+  return { technologies, redFlags };
 }
 
 
